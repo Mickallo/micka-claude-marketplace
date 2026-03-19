@@ -62,6 +62,30 @@ Detect the argument format to determine the source:
 | Linear URL (`linear.app/...`) | Import from Linear | `/kanban add https://linear.app/...` |
 | Free text | Manual entry | `/kanban add "Fix login bug"` |
 
+#### Auto-Level Detection
+
+Analyze the task title and description to auto-assign a pipeline level:
+
+| Signal | Level |
+|--------|-------|
+| Typo, rename, config change, formatting, 1 file | **L1 Quick** |
+| Bug fix, small feature, refactor, 2-5 files | **L2 Standard** |
+| New feature, architecture change, 6+ files, cross-cutting concern, security | **L3 Full** |
+
+**Keywords → L1**: typo, rename, fix typo, config, formatting, cleanup, lint, wording, env, gitignore, README
+**Keywords → L2**: fix, bug, refactor, update, add endpoint, test, migration
+**Keywords → L3**: architecture, redesign, new module, security, auth, multi-*, cross-cutting, system
+
+Apply auto-level after collecting title + description. Show the suggested level to the user for confirmation:
+
+```
+Auto-detected level: L2 Standard (bug fix, 3 files estimated)
+Accept? [Y/n/1/2/3]
+```
+
+- `Y` or empty → accept suggestion
+- `1`/`2`/`3` → override with that level
+
 #### Source: Linear
 
 1. Fetch the issue from Linear using available Linear MCP tools (search via `ToolSearch` `+linear`). Extract: title, description, priority, labels, state.
@@ -70,14 +94,7 @@ Detect the argument format to determine the source:
    - **description** ← issue description (markdown)
    - **priority** ← `urgent`/`high` → `high`, `medium` → `medium`, `low`/`none` → `low`
    - **tags** ← issue labels as JSON array
-3. Ask user via AskUserQuestion for pipeline level only:
-   ```
-   Pipeline level?
-   - L1 Quick: todo → impl → done (typos, config, cleanup)
-   - L2 Standard: todo → plan → impl → review → done (features, bugs)
-   - L3 Full: todo → plan → review → impl → review → test → done (architecture)
-   ```
-   Default: `L3` if user skips.
+3. Run **Auto-Level Detection** on the imported title + description
 4. Show the imported data to user for confirmation before creating
 5. Create task (see below)
 6. Store the Linear issue identifier in a note on the task for traceability:
@@ -91,10 +108,10 @@ Detect the argument format to determine the source:
 
 1. Ask user via AskUserQuestion for each field separately:
    - **Priority**: `high` / `medium` / `low` (default: `medium`)
-   - **Level**: `L1` / `L2` / `L3` (default: `L3`)
    - **Description** (MANDATORY): what should be done and why? (markdown)
    - **Tags**: comma-separated, optional
-2. Create task (see below)
+2. Run **Auto-Level Detection** on the title + description
+3. Create task (see below)
 
 #### Create task
 
@@ -143,10 +160,9 @@ Output task counts per column + completion rate.
 
 ## Web Board
 
-Start: `./kanban-board-start.sh` → `http://localhost:5173/?project=<PROJECT>`
+Start: `/kanban-board-start` → `http://localhost:5173/?project=<PROJECT>`
 
 Add to `.gitignore`:
 ```
 .claude/kanban.json
-kanban-board-start.sh
 ```
