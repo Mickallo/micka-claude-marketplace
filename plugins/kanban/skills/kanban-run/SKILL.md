@@ -28,33 +28,42 @@ Read the task's `level` field first.
 
 ```
 L1 Quick:
-  todo → Builder(opus) → commit → done
+  todo → Builder → commit → done
 
 L2 Standard:
-  todo → Planner(opus) → impl (skip plan_review)
-  impl → Builder(opus) + Shield(sonnet) → impl_review
-  impl_review → Inspector(opus) → [confirm] → commit → done / reject → impl
+  todo → Planner → impl (skip plan_review)
+  impl → Builder + Shield → impl_review
+  impl_review → Inspector → [confirm] → commit → done / reject → impl
 
 L3 Full:
-  todo → Planner(opus) → plan_review
-  plan_review → Critic(sonnet) → [confirm] → impl / reject → plan
-  impl → Builder(opus) + Shield(sonnet) → impl_review
-  impl_review → Inspector(opus) → [confirm] → test / reject → impl
-  test → Ranger(sonnet) → pass → commit → done / fail → impl
+  todo → Planner → plan_review
+  plan_review → Critic → [confirm] → impl / reject → plan
+  impl → Builder + Shield → impl_review
+  impl_review → Inspector → [confirm] → test / reject → impl
+  test → Ranger → pass → commit → done / fail → impl
 
 Circuit breaker: plan_review_count > 3 OR impl_review_count > 3 → stop, ask user
 ```
 
+## Model Routing
+
+Resolve each agent's model dynamically before dispatch. See `internal-kanban-shared` → **Model Routing** table.
+
+1. Read task `level` (1/2/3) and `priority` (high/medium/low)
+2. If `priority == "high"` → use L3 column
+3. Otherwise → use column matching `level`
+4. Pass resolved model to `Agent(model = "<resolved>")`
+
 ## Agent Dispatch
 
-| Status | Agent (`subagent_type`) | Nickname | Model |
-|--------|------------------------|----------|-------|
-| `todo` | `kanban:Planner` | Planner | opus |
-| `plan_review` | `kanban:Critic` | Critic | sonnet |
-| `impl` step 1 | `kanban:Builder` | Builder | opus |
-| `impl` step 2 | `kanban:Shield` | Shield | sonnet |
-| `impl_review` | `kanban:Inspector` | Inspector | opus |
-| `test` | `kanban:Ranger` | Ranger | sonnet |
+| Status | Agent (`subagent_type`) | Nickname |
+|--------|------------------------|----------|
+| `todo` | `kanban:Planner` | Planner |
+| `plan_review` | `kanban:Critic` | Critic |
+| `impl` step 1 | `kanban:Builder` | Builder |
+| `impl` step 2 | `kanban:Shield` | Shield |
+| `impl_review` | `kanban:Inspector` | Inspector |
+| `test` | `kanban:Ranger` | Ranger |
 
 ## Dispatch Procedure
 
@@ -83,6 +92,7 @@ Build the prompt with relevant task fields injected, then dispatch with `mode: "
 ```
 Agent(
   subagent_type = "kanban:<AgentName>",
+  model = "<resolved model>",
   mode = "auto",
   prompt = "Kanban task #<ID>, project: <PROJECT>\n\nTitle: <title>\nDescription: <description>\nPlan: <plan>\n..."
 )

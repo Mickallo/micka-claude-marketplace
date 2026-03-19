@@ -88,33 +88,21 @@ Create `.claude/kanban.json` at the project root:
 }
 ```
 
-### 5. Create board launcher
-
-Write `kanban-board-start.sh` at the project root:
-```bash
-#!/usr/bin/env bash
-pnpm --dir ~/.claude/kanban-board dev
-```
-
-```bash
-chmod +x kanban-board-start.sh
-```
-
-### 6. Existing config detection
+### 5. Existing config detection
 
 If `.claude/kanban.json` already exists:
 1. Read the `project` field, strip `.db` suffix if present
 2. Ask user whether to overwrite or keep as-is
 
-### 7. Output
+### 6. Output
 
 ```
 Project '<PROJECT_NAME>' registered.
 
   Config:  .claude/kanban.json
   DB:      ~/.claude/kanban-dbs/<PROJECT_NAME>.db
-  Board:   http://localhost:5173/?project=<PROJECT_NAME>
-  Start:   ./kanban-board-start.sh
+  Board:   /kanban-board-start
+  Stop:    /kanban-board-stop
 
 Add tasks with /kanban add <title>
 ```

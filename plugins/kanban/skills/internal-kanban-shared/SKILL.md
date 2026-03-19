@@ -29,15 +29,36 @@ Store as PROJECT. DB path: `$HOME/.claude/kanban-dbs/${PROJECT}.db`.
 
 ## 7-Column Pipeline
 
-| Column | Status | Agent (`subagent_type`) | Model |
-|--------|--------|------------------------|-------|
-| Req | `todo` | User | - |
-| Plan | `plan` | `kanban:Planner` | opus |
-| Review Plan | `plan_review` | `kanban:Critic` | sonnet |
-| Impl | `impl` | `kanban:Builder` → `kanban:Shield` | opus → sonnet |
-| Review Impl | `impl_review` | `kanban:Inspector` (mode kanban) | opus |
-| Test | `test` | `kanban:Ranger` | sonnet |
-| Done | `done` | - | - |
+| Column | Status | Agent (`subagent_type`) |
+|--------|--------|------------------------|
+| Req | `todo` | User |
+| Plan | `plan` | `kanban:Planner` |
+| Review Plan | `plan_review` | `kanban:Critic` |
+| Impl | `impl` | `kanban:Builder` → `kanban:Shield` |
+| Review Impl | `impl_review` | `kanban:Inspector` (mode kanban) |
+| Test | `test` | `kanban:Ranger` |
+| Done | `done` | - |
+
+## Model Routing
+
+Models are selected dynamically based on task `level` and `priority`.
+
+**Override rule**: `priority = "high"` → always use the L3 models regardless of level.
+
+| Agent | L1 | L2 | L3 |
+|-------|-----|-----|-----|
+| Planner | — | sonnet | opus |
+| Critic | — | — | sonnet |
+| Builder | sonnet | sonnet | opus |
+| Shield | — | haiku | sonnet |
+| Inspector | — | sonnet | opus |
+| Ranger | — | — | sonnet |
+
+To resolve the model for an agent dispatch:
+1. Read task `level` and `priority`
+2. If `priority == "high"`, use L3 column
+3. Otherwise use the column matching `level`
+4. Pass the resolved model to `Agent(model = "<resolved>")`
 
 ### Valid Status Transitions
 
@@ -181,12 +202,14 @@ Each agent MUST prepend a signature header to its output:
 
 | Nickname | Agent | Model | Writes to |
 |----------|-------|-------|-----------|
-| `Planner` | `kanban:Planner` | `opus` | `plan`, `decision_log`, `done_when` |
-| `Critic` | `kanban:Critic` | `sonnet` | `plan_review_comments` |
-| `Builder` | `kanban:Builder` | `opus` | `implementation_notes` |
-| `Shield` | `kanban:Shield` | `sonnet` | `implementation_notes` (append) |
-| `Inspector` | `kanban:Inspector` | `opus` | `review_comments` |
-| `Ranger` | `kanban:Ranger` | `sonnet` | `test_results` |
+| `Planner` | `kanban:Planner` | routed | `plan`, `decision_log`, `done_when` |
+| `Critic` | `kanban:Critic` | routed | `plan_review_comments` |
+| `Builder` | `kanban:Builder` | routed | `implementation_notes` |
+| `Shield` | `kanban:Shield` | routed | `implementation_notes` (append) |
+| `Inspector` | `kanban:Inspector` | routed | `review_comments` |
+| `Ranger` | `kanban:Ranger` | routed | `test_results` |
+
+Model is resolved via the **Model Routing** table above.
 
 ## JSON Formats
 
