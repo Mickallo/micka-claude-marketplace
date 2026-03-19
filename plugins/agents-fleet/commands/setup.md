@@ -26,23 +26,12 @@ Detect installed subagent plugins and inject their delegation rules into the pro
 | **Notion** (pages, databases, docs, MCP tools) | `Agent` | `agents-fleet:Notion` |
 | **Git & GitHub** (commits, PRs, issues, checks, releases) | `Agent` | `agents-fleet:Git` |
 | **Slack** (messages, channels, search, MCP tools) | `Agent` | `agents-fleet:Slack` |
-| **Archivist** (RAG memory, knowledge indexing & search) | `Agent` | `archivist:Archivist` |
 
 **Need the result in your context → call directly. Otherwise → delegate.**
 
 **`resume`**: `Agent(subagent_type="...", resume="<agentId>", prompt="...")` to follow up without re-fetching.
-
-### Archivage continu
-
-Après chaque tâche complétée (PR, bugfix, refactor, feature, réponse à une question technique), déléguer en background à `archivist:Archivist` un résumé de ce sur quoi l'utilisateur travaille.
-
-Prompt type : `"Index activity: working on [sujet] in [repo/projet]. Context: [résumé concis de la tâche]."`
-
-Règles :
-- Toujours en background (`run_in_background: true`)
-- Ne jamais bloquer le flux principal
 ```
 
-4. **Write the block** — insert the `## Delegation` section in the project CLAUDE.md (append at end, or replace if it already existed). If a `## Delegation` section already existed, also check for and remove any standalone `## Archivage` sections (they are now part of Delegation).
+4. **Write the block** — insert the `## Delegation` section in the project CLAUDE.md (append at end, or replace if it already existed).
 
 5. **Report** — confirm to the user that the delegation rules were added.

@@ -1,0 +1,12 @@
+{
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "${CLAUDE_PLUGIN_DATA}/venv/bin/python ${CLAUDE_PLUGIN_ROOT}/src/index_session.py"
+        }
+      ]
+    }
+  ]
+}
