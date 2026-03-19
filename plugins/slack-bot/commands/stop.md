@@ -1,6 +1,5 @@
 ---
 description: Stop the Slack bot
-disable-model-invocation: true
 ---
 
 1. Find PID: `pgrep -f "slack_bot.py"`

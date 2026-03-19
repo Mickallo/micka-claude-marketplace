@@ -1,6 +1,5 @@
 ---
 description: Check if the Slack bot is running
-disable-model-invocation: true
 ---
 
 1. Find PID: `pgrep -f "slack_bot.py"`
