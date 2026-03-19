@@ -1,0 +1,28 @@
+{
+  "name": "multi-agents",
+  "version": "0.2.0",
+  "description": "Unified multi-agent plugin — 11 subagents (Git, CodeReview, Slack, Linear, Notion, Archivist, Planner, Critic, Builder, Shield, Ranger) + 5 workflows (pr-review, pr-notify, kanban, kanban-run, kanban-refine) + setup/unsetup/kanban-init commands",
+  "author": {
+    "name": "Mickael Allouche"
+  },
+  "repository": "https://github.com/evaneos/evaneos-claude-marketplace",
+  "license": "MIT",
+  "keywords": [
+    "multi-agent",
+    "subagent",
+    "git",
+    "slack",
+    "linear",
+    "notion",
+    "code-review",
+    "workflow",
+    "orchestration",
+    "archivist",
+    "rag",
+    "knowledge-base",
+    "kanban",
+    "pipeline",
+    "task-management",
+    "ai-team"
+  ]
+}
