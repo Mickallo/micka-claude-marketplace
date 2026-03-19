@@ -6,5 +6,12 @@
   "metadata": {
     "description": "Collection de plugins Claude Code par Micka"
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "slack-bot",
+      "source": "./plugins/slack-bot",
+      "description": "Slack bot (Socket Mode) powered by Claude Code — start/stop/status via skill",
+      "version": "1.0.0"
+    }
+  ]
 }

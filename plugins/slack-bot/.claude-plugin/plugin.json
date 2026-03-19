@@ -1,0 +1,10 @@
+{
+  "name": "slack-bot",
+  "version": "1.0.0",
+  "description": "Slack bot (Socket Mode) powered by Claude Code — start/stop/status via skill",
+  "author": {
+    "name": "Mickael Allouche"
+  },
+  "license": "MIT",
+  "keywords": ["slack", "bot", "socket-mode", "websocket"]
+}
