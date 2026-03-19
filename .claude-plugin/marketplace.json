@@ -1,0 +1,10 @@
+{
+  "name": "micka-claude-marketplace",
+  "owner": {
+    "name": "Micka"
+  },
+  "metadata": {
+    "description": "Collection de plugins Claude Code par Micka"
+  },
+  "plugins": []
+}
