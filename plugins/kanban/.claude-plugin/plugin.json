@@ -1,0 +1,10 @@
+{
+  "name": "kanban",
+  "version": "1.0.0",
+  "description": "AI team kanban pipeline — Planner, Critic, Builder, Shield, Inspector, Ranger + board UI",
+  "author": {
+    "name": "Mickael Allouche"
+  },
+  "license": "MIT",
+  "keywords": ["kanban", "pipeline", "ai-team", "planner", "builder", "code-review", "tdd"]
+}

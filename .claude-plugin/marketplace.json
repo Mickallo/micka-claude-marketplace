@@ -20,6 +20,12 @@
       "version": "1.0.0"
     },
     {
+      "name": "kanban",
+      "source": "./plugins/kanban",
+      "description": "AI team kanban pipeline — Planner, Critic, Builder, Shield, Inspector, Ranger + board UI",
+      "version": "1.0.0"
+    },
+    {
       "name": "slack-bot",
       "source": "./plugins/slack-bot",
       "description": "Slack bot (Socket Mode) powered by Claude Code — start/stop/status via commands",
