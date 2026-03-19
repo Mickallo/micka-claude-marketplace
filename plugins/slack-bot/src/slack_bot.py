@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import threading
 import time
 
@@ -323,7 +324,7 @@ def index_in_archivist(question: str, answer: str):
 
         subprocess.run(
             [
-                "python3", archivist_path,
+                sys.executable, archivist_path,
                 "index",
                 "--content", summary,
                 "--source", "slack-bot",
@@ -462,7 +463,7 @@ def cleanup_archivist():
     archivist_path = str(Path(__file__).parent / "archivist.py")
     try:
         result = subprocess.run(
-            ["python3", archivist_path, "maintain"],
+            [sys.executable, archivist_path, "maintain"],
             capture_output=True, text=True, timeout=60,
         )
         if result.returncode == 0:

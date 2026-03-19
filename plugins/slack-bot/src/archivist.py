@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import sys
 import uuid
 from datetime import datetime, timedelta
@@ -11,7 +12,7 @@ from pathlib import Path
 import chromadb
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
-DB_PATH = Path(__file__).parent.parent / "data" / "chromadb_data"
+DB_PATH = Path(os.environ.get("CLAUDE_PLUGIN_DATA", Path(__file__).parent.parent / "data")) / "chromadb_data"
 COLLECTION_NAME = "team_knowledge"
 RETENTION_DAYS = 365  # 1 an
 
