@@ -8,9 +8,15 @@
   },
   "plugins": [
     {
+      "name": "archivist",
+      "source": "./plugins/archivist",
+      "description": "Persistent RAG knowledge base powered by ChromaDB — search, index, maintain",
+      "version": "1.0.0"
+    },
+    {
       "name": "slack-bot",
       "source": "./plugins/slack-bot",
-      "description": "Slack bot (Socket Mode) powered by Claude Code — start/stop/status via skill",
+      "description": "Slack bot (Socket Mode) powered by Claude Code — start/stop/status via commands",
       "version": "1.0.0"
     }
   ]

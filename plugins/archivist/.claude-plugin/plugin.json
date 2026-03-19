@@ -1,0 +1,10 @@
+{
+  "name": "archivist",
+  "version": "1.0.0",
+  "description": "Persistent RAG knowledge base powered by ChromaDB — search, index, maintain",
+  "author": {
+    "name": "Mickael Allouche"
+  },
+  "license": "MIT",
+  "keywords": ["rag", "chromadb", "knowledge-base", "memory", "archivist"]
+}

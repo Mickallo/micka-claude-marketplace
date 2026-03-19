@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import subprocess
-import sys
 import threading
 import time
 
@@ -290,55 +289,25 @@ def call_claude_streaming(prompt: str, channel: str, status_ts: str) -> str:
 
 
 def index_in_archivist(question: str, answer: str):
-    """Index a Q&A interaction via Claude for smart summarization, then store in RAG."""
-    archivist_path = str(Path(__file__).parent / "archivist.py")
+    """Index a Q&A interaction by delegating to the Archivist agent via Claude."""
     try:
         prompt = (
-            "You must output ONLY valid JSON, no other text. "
-            "Summarize this Q&A interaction for a knowledge base. "
-            "Return JSON with: "
-            '{"summary": "concise summary of the Q&A", "topics": "comma-separated key topics"}\n\n'
-            f"Question: {question}\n\nAnswer: {answer[:2000]}"
+            f"Index this interaction in the Archivist knowledge base.\n\n"
+            f"Question: {question}\n\n"
+            f"Answer: {answer[:2000]}\n\n"
+            f"Summarize and index with source 'slack-bot'."
         )
-        result = subprocess.run(
-            [
-                "claude", "--print", "--dangerously-skip-permissions",
-                "--json-schema", '{"type":"object","properties":{"summary":{"type":"string"},"topics":{"type":"string"}},"required":["summary","topics"]}',
-                "--output-format", "json",
-                prompt,
-            ],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode == 0:
-            try:
-                data = json.loads(result.stdout)
-                structured = data.get("structured_output", {})
-                summary = structured.get("summary", f"Q: {question}")
-                topics = structured.get("topics", "")
-            except json.JSONDecodeError:
-                summary = f"Q: {question}\nA: {answer[:500]}"
-                topics = ""
-        else:
-            summary = f"Q: {question}\nA: {answer[:500]}"
-            topics = ""
-
         subprocess.run(
             [
-                sys.executable, archivist_path,
-                "index",
-                "--content", summary,
-                "--source", "slack-bot",
-                "--topic", topics,
+                "claude", "--print", "--dangerously-skip-permissions",
+                prompt,
             ],
-            capture_output=True,
-            timeout=30,
+            capture_output=True, text=True, timeout=120,
         )
         logger.info(f"Indexed interaction: {question[:50]}...")
     except Exception as e:
         logger.warning(f"Failed to index in archivist: {e}")
 
-
-from pathlib import Path
 
 
 def handle_question(question: str, channel: str, thread_ts: str, event_ts: str):
@@ -459,17 +428,19 @@ def handle_dm(event, say):
 
 
 def cleanup_archivist():
-    """Run archivist maintenance on startup."""
-    archivist_path = str(Path(__file__).parent / "archivist.py")
+    """Run archivist maintenance on startup by delegating to Claude."""
     try:
         result = subprocess.run(
-            [sys.executable, archivist_path, "maintain"],
-            capture_output=True, text=True, timeout=60,
+            [
+                "claude", "--print", "--dangerously-skip-permissions",
+                "Run maintenance on the Archivist knowledge base. Clean expired and duplicate entries.",
+            ],
+            capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:
-            logger.info(f"Archivist cleanup: {result.stdout.strip()}")
+            logger.info(f"Archivist cleanup: done")
         else:
-            logger.warning(f"Archivist cleanup failed: {result.stderr}")
+            logger.warning(f"Archivist cleanup failed: {result.stderr[:200]}")
     except Exception as e:
         logger.warning(f"Archivist cleanup error: {e}")
 
