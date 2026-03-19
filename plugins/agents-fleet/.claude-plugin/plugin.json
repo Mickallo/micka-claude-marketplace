@@ -1,0 +1,10 @@
+{
+  "name": "agents-fleet",
+  "version": "1.0.0",
+  "description": "Core delegation agents — Git, Slack, Linear, Notion + setup/unsetup commands",
+  "author": {
+    "name": "Mickael Allouche"
+  },
+  "license": "MIT",
+  "keywords": ["agents", "delegation", "git", "slack", "linear", "notion"]
+}

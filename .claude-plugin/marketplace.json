@@ -8,6 +8,12 @@
   },
   "plugins": [
     {
+      "name": "agents-fleet",
+      "source": "./plugins/agents-fleet",
+      "description": "Core delegation agents — Git, Slack, Linear, Notion + setup/unsetup",
+      "version": "1.0.0"
+    },
+    {
       "name": "archivist",
       "source": "./plugins/archivist",
       "description": "Persistent RAG knowledge base powered by ChromaDB — search, index, maintain",
