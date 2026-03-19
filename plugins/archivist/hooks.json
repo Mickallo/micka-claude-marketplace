@@ -1,10 +1,14 @@
 {
-  "Stop": [
+  "PostToolUse": [
     {
+      "matcher": {
+        "tool_name": "Bash",
+        "command_pattern": "git push"
+      },
       "hooks": [
         {
           "type": "command",
-          "command": "${CLAUDE_PLUGIN_DATA}/venv/bin/python ${CLAUDE_PLUGIN_ROOT}/src/index_session.py"
+          "command": "${CLAUDE_PLUGIN_DATA}/venv/bin/python ${CLAUDE_PLUGIN_ROOT}/src/index_push.py"
         }
       ]
     }
