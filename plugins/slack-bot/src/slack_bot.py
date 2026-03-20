@@ -268,11 +268,34 @@ def handle_dm(event, say):
     ).start()
 
 
+def set_presence(presence: str):
+    try:
+        app.client.users_setPresence(presence=presence)
+        logger.info(f"Bot presence set to {presence}")
+    except Exception as e:
+        logger.warning(f"Failed to set presence: {e}")
+
+
 def main():
+    import signal
+
     logger.info("Starting Slack bot (API mode, model: %s)...", MODEL)
     logger.info("Archivist python: %s", ARCHIVIST_PYTHON)
     logger.info("Archivist script: %s", ARCHIVIST_SCRIPT)
+    set_presence("auto")
+
     handler = SocketModeHandler(app, os.environ["SLACK_BOT_SOCKET_MODE_TOKEN"])
+
+    def shutdown(signum, frame):
+        logger.info("Shutting down...")
+        handler.close()
+        set_presence("away")
+        logger.info("Bye.")
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+
     handler.start()
 
 
