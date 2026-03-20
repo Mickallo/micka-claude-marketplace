@@ -44,7 +44,15 @@ Output as markdown table: ID | Status | Priority | Title.
 
 ### `/kanban context`
 
-Run first when starting a new session. Fetch board and output pipeline state summary:
+Run first when starting a new session. Fetch both boards and output pipeline state summary:
+
+**Projects Board:**
+- Analysing (status `analyse`)
+- Processing (status `processing`)
+- Recently Done projects (last 3, status `done`)
+- Backlog (first 3, status `backlog`)
+
+**Tasks Board:**
 - Implementing (status `impl`)
 - Plan Review (status `plan_review`)
 - Impl Review (status `impl_review`)
@@ -52,15 +60,48 @@ Run first when starting a new session. Fetch board and output pipeline state sum
 - Recently Done (last 5, status `done`)
 - Next Todo (first 3, status `todo`)
 
+### `/kanban projects`
+
+Display the projects board.
+
+```bash
+curl -s "http://localhost:5173/api/projects-board?project=$PROJECT"
+```
+
+Parse the JSON response in your context.
+
+Output as markdown table: ID | Status | Title | Linear URL.
+
 ### `/kanban add <arg>`
 
 Detect the argument format to determine the source:
 
-| Argument | Source | Example |
-|----------|--------|---------|
-| Linear identifier (`XXX-123`) | Import from Linear | `/kanban add ENG-42` |
-| Linear URL (`linear.app/...`) | Import from Linear | `/kanban add https://linear.app/...` |
-| Free text | Manual entry | `/kanban add "Fix login bug"` |
+| Argument | Source | Target Board | Example |
+|----------|--------|-------------|---------|
+| Linear project URL (`linear.app/.../project/...`) | Import Linear project | **Projects board** (backlog) | `/kanban add https://linear.app/team/project/xxx` |
+| Linear identifier (`XXX-123`) | Import from Linear issue | Tasks board (todo) | `/kanban add ENG-42` |
+| Linear issue URL (`linear.app/.../issue/...`) | Import from Linear issue | Tasks board (todo) | `/kanban add https://linear.app/...` |
+| Free text | Manual entry | Tasks board (todo) | `/kanban add "Fix login bug"` |
+
+#### Source: Linear Project
+
+Detect by URL containing `/project/` path segment.
+
+1. Fetch the project from Linear using `mcp__plugin_linear_linear__get_project`. Extract: name, description, status, teams.
+2. Create a project card on the Projects board:
+   ```bash
+   curl -s -X POST http://localhost:5173/api/project-card \
+     -H 'Content-Type: application/json' \
+     -d "{\"title\": \"$TITLE\", \"project\": \"$PROJECT\", \"description\": \"$DESC\", \"linear_project_id\": \"$LINEAR_PROJECT_ID\", \"linear_project_url\": \"$LINEAR_URL\"}"
+   ```
+3. Store the Linear project URL in a note for traceability:
+   ```bash
+   curl -s -X POST "http://localhost:5173/api/project-card/$ID/note?project=$PROJECT" \
+     -H 'Content-Type: application/json' \
+     -d '{"text": "Source: Linear Project <URL>"}'
+   ```
+4. Output confirmation with new project card ID.
+5. Suggest: `Run /kanban-run P#<ID> to start analysis, or /kanban-run P#<ID> --auto for full pipeline.`
 
 #### Auto-Level Detection
 

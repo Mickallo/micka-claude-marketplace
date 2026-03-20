@@ -59,6 +59,33 @@ header h1 {
   color: #f1f5f9;
 }
 
+/* Board type toggle (Projects / Tasks) */
+.board-type-tabs {
+  display: flex;
+  gap: 2px;
+  background: #0f172a;
+  border-radius: 6px;
+  padding: 2px;
+}
+.board-type-btn {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.board-type-btn:hover {
+  color: #94a3b8;
+}
+.board-type-btn.active {
+  background: #334155;
+  color: #f1f5f9;
+}
+
 .header-meta {
   display: flex;
   align-items: center;
@@ -177,6 +204,74 @@ main#board {
 }
 main#board.hidden {
   display: none;
+}
+
+/* Projects Board Layout — 4 columns */
+main#projects-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 0;
+  height: calc(100vh - 57px - 44px);
+  overflow-x: auto;
+}
+main#projects-board.hidden {
+  display: none;
+}
+main#projects-board .column.backlog .column-header {
+  border-top: 3px solid #64748b;
+}
+main#projects-board .column.analyse .column-header {
+  border-top: 3px solid #a78bfa;
+}
+main#projects-board .column.processing .column-header {
+  border-top: 3px solid #38bdf8;
+}
+main#projects-board .column.done .column-header {
+  border-top: 3px solid #4ade80;
+}
+
+/* Project card specifics */
+.project-card {
+  position: relative;
+}
+.project-card .progress-bar {
+  height: 4px;
+  background: #1e293b;
+  border-radius: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.project-card .progress-bar .progress-fill {
+  height: 100%;
+  background: #4ade80;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+.project-card .progress-label {
+  font-size: 0.65rem;
+  color: #64748b;
+  margin-top: 2px;
+}
+.project-card .milestone-list {
+  margin-top: 6px;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+.project-card .milestone-item {
+  padding: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.project-card .linear-link {
+  font-size: 0.65rem;
+  color: #60a5fa;
+  text-decoration: none;
+  margin-top: 4px;
+  display: inline-block;
+}
+.project-card .linear-link:hover {
+  text-decoration: underline;
 }
 
 .column {

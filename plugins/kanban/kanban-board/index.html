@@ -21,6 +21,10 @@
         <h1>Kanban Board</h1>
         <div id="project-filter"></div>
       </div>
+      <div class="board-type-tabs">
+        <button class="board-type-btn active" id="type-tasks">Tasks</button>
+        <button class="board-type-btn" id="type-projects">Projects</button>
+      </div>
       <div class="header-tabs">
         <button class="tab-btn active" id="tab-board">Board</button>
         <button class="tab-btn" id="tab-list">List</button>
@@ -43,6 +47,7 @@
       </button>
     </div>
     <main id="board"></main>
+    <main id="projects-board" class="hidden"></main>
     <main id="list-view" class="hidden"></main>
     <!-- Modal -->
     <div id="modal-overlay" class="modal-overlay hidden">

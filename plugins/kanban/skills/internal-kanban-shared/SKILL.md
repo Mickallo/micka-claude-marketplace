@@ -202,6 +202,7 @@ Each agent MUST prepend a signature header to its output:
 
 | Nickname | Agent | Model | Writes to |
 |----------|-------|-------|-----------|
+| `Analyst` | `kanban:Analyst` | opus | project `description`, `milestones`, `task_index` |
 | `Planner` | `kanban:Planner` | routed | `plan`, `decision_log`, `done_when` |
 | `Critic` | `kanban:Critic` | routed | `plan_review_comments` |
 | `Builder` | `kanban:Builder` | routed | `implementation_notes` |
@@ -261,6 +262,124 @@ Model is resolved via the **Model Routing** table above.
 ]
 ```
 
+## Projects Board
+
+Separate board for tracking Linear projects through analysis and decomposition.
+
+### Projects Table Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS projects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'backlog',
+  description TEXT,
+  linear_project_id TEXT,
+  linear_project_url TEXT,
+  milestones TEXT,
+  task_index TEXT,
+  agent_log TEXT,
+  current_agent TEXT,
+  tags TEXT,
+  notes TEXT,
+  rank INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  started_at TEXT,
+  completed_at TEXT
+);
+```
+
+| Column | Description |
+|--------|-------------|
+| `status` | `backlog` / `analyse` / `processing` / `done` |
+| `linear_project_id` | Linear project identifier |
+| `linear_project_url` | Original Linear project URL |
+| `milestones` | JSON array of `{id, linear_id, title, status}` |
+| `task_index` | JSON array of child task IDs |
+| `description` | Analyst exploration report (markdown) |
+
+### Project Status Transitions
+
+```
+backlog    → analyse
+analyse    → processing, backlog
+processing → done
+done       → (terminal)
+```
+
+### Task-Project Linking
+
+Tasks table has two linking columns:
+- `project_card_id` — references `projects.id` (parent project card)
+- `milestone_id` — references a milestone within the project
+
+Auto-completion: when ALL tasks with a given `project_card_id` reach `done`, the project card auto-moves to `done`.
+
+### Projects Board Pipeline
+
+| Column | Status | Agent |
+|--------|--------|-------|
+| Backlog | `backlog` | User (import from Linear) |
+| Analysis | `analyse` | `kanban:Analyst` |
+| Processing | `processing` | (sub-tasks running on Tasks board) |
+| Done | `done` | Auto (all sub-tasks done) |
+
+### Analyst Agent
+
+| Nickname | Agent | Model | Writes to |
+|----------|-------|-------|-----------|
+| `Analyst` | `kanban:Analyst` | opus | project `description`, `milestones`, `task_index` |
+
+The Analyst:
+1. Reads project card (title, description, Linear project URL)
+2. Deep-explores the codebase
+3. Produces exploration report
+4. Decomposes into milestones and issues
+5. Creates milestones on Linear (via Linear MCP tools)
+6. Creates issues on Linear (linked to milestones)
+7. Creates corresponding task cards on Tasks board (with `project_card_id` and `milestone_id`)
+8. Updates project card with report, milestones JSON, and task_index
+9. Moves project card to `processing`
+
+### Projects Board API Endpoints
+
+```bash
+# Projects board
+curl -s "http://localhost:5173/api/projects-board?project=$PROJECT"
+
+# Read project card
+curl -s "http://localhost:5173/api/project-card/$ID?project=$PROJECT"
+
+# Create project card
+curl -s -X POST http://localhost:5173/api/project-card \
+  -H 'Content-Type: application/json' \
+  -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"linear_project_id\": \"...\", \"linear_project_url\": \"...\"}"
+
+# Update project card
+curl -s -X PATCH "http://localhost:5173/api/project-card/$ID?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"description": "...", "milestones": "...", "task_index": "...", "status": "processing"}'
+
+# Get child tasks
+curl -s "http://localhost:5173/api/project-card/$ID/tasks?project=$PROJECT"
+
+# Add note
+curl -s -X POST "http://localhost:5173/api/project-card/$ID/note?project=$PROJECT" \
+  -H 'Content-Type: application/json' -d '{"text": "..."}'
+
+# Delete
+curl -s -X DELETE "http://localhost:5173/api/project-card/$ID?project=$PROJECT"
+```
+
+### Create task linked to project
+
+```bash
+curl -s -X POST http://localhost:5173/api/task \
+  -H 'Content-Type: application/json' \
+  -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"medium\", \"level\": 3, \"description\": \"...\", \"project_card_id\": $PROJECT_CARD_ID, \"milestone_id\": \"$MILESTONE_ID\"}"
+```
+
 ## Error Handling
 
 - **Agent failure**: 1 retry; 2nd failure → keep status, log to `agent_log`, notify user
@@ -273,6 +392,7 @@ Model is resolved via the **Model Routing** table above.
 
 | Nickname | Reads | Writes (signed) | Moves to |
 |----------|-------|-----------------|----------|
+| `Analyst` | project `title`, `description`, `linear_project_url` | project `description`, `milestones`, `task_index` + creates tasks | `processing` |
 | `Refiner` | `title`, `description` | `description` (rewrite) | stays `todo` |
 | `Planner` | `description` | `plan`, `decision_log`, `done_when` | `plan_review` |
 | `Critic` | `description`, `plan`, `decision_log`, `done_when` | `plan_review_comments` | `impl` or `plan` |

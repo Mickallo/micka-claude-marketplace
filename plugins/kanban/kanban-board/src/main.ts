@@ -40,6 +40,41 @@ interface Board {
   projects: string[];
 }
 
+interface ProjectCard {
+  id: number;
+  project: string;
+  title: string;
+  status: string;
+  description: string | null;
+  linear_project_id: string | null;
+  linear_project_url: string | null;
+  milestones: string | null;
+  task_index: string | null;
+  agent_log: string | null;
+  current_agent: string | null;
+  tags: string | null;
+  notes: string | null;
+  rank: number;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+interface ProjectsBoard {
+  backlog: ProjectCard[];
+  analyse: ProjectCard[];
+  processing: ProjectCard[];
+  done: ProjectCard[];
+  projects: string[];
+}
+
+const PROJECT_COLUMNS = [
+  { key: "backlog",    label: "Backlog",    icon: "\u{1F4E5}" },
+  { key: "analyse",    label: "Analysis",   icon: "\u{1F50E}" },
+  { key: "processing", label: "Processing", icon: "\u{2699}\uFE0F" },
+  { key: "done",       label: "Done",       icon: "\u2705" },
+];
+
 const COLUMNS = [
   { key: "todo",        label: "Requirements", icon: "\u{1F4CB}" },
   { key: "plan",        label: "Plan",         icon: "\u{1F5FA}\uFE0F" },
@@ -61,6 +96,7 @@ const STATUS_BADGES: Record<string, string> = {
 let currentProject: string | null = localStorage.getItem('kanban-project');
 let isDragging = false;
 let currentView: "board" | "list" = "board";
+let currentBoardType: "tasks" | "projects" = (localStorage.getItem('kanban-board-type') as "tasks" | "projects") || "tasks";
 let currentSearch: string = '';
 let currentSort: string = localStorage.getItem('kanban-sort') || 'default';
 let hideOldDone: boolean = localStorage.getItem('kanban-hide-old') === 'true';
@@ -906,6 +942,290 @@ async function showTaskDetail(id: number, project?: string) {
   }
 }
 
+function renderProjectCard(card: ProjectCard): string {
+  const taskIds = parseJsonArray(card.task_index);
+  const milestones = parseJsonArray(card.milestones);
+
+  const agentBadge = card.current_agent
+    ? `<span class="badge agent-tag">${card.current_agent}</span>`
+    : "";
+
+  const dateBadge = card.completed_at
+    ? `<span class="badge date">${card.completed_at.slice(0, 10)}</span>`
+    : card.created_at
+      ? `<span class="badge created">${timeAgo(card.created_at)}</span>`
+      : "";
+
+  const projectBadge =
+    !currentProject && card.project
+      ? `<span class="badge project">${card.project}</span>`
+      : "";
+
+  const linearLink = card.linear_project_url
+    ? `<a class="linear-link" href="${card.linear_project_url}" target="_blank" onclick="event.stopPropagation()">Linear</a>`
+    : "";
+
+  const tags = parseTags(card.tags)
+    .map((t) => `<span class="tag">${t}</span>`)
+    .join("");
+
+  const desc = card.description
+    ? card.description.split("\n")[0].slice(0, 100)
+    : "";
+
+  const noteCount = parseJsonArray(card.notes).length;
+  const notesBadge = noteCount > 0
+    ? `<span class="badge notes-count" title="${noteCount} note(s)">\u{1F4AC} ${noteCount}</span>`
+    : "";
+
+  // Milestones mini-list
+  const milestonesHtml = milestones.length > 0
+    ? `<div class="milestone-list">${milestones.slice(0, 4).map((m: any) =>
+        `<div class="milestone-item">${m.status === "done" ? "\u2705" : "\u{1F7E0}"} ${m.title || m.linear_id || "Milestone"}</div>`
+      ).join("")}${milestones.length > 4 ? `<div class="milestone-item">+${milestones.length - 4} more</div>` : ""}</div>`
+    : "";
+
+  // Progress bar if has tasks
+  let progressHtml = "";
+  if (card.status === "processing" || card.status === "done") {
+    progressHtml = `<div class="progress-bar"><div class="progress-fill" style="width:0%" data-project-card-id="${card.id}"></div></div>
+      <div class="progress-label" data-project-progress-id="${card.id}"></div>`;
+  }
+
+  return `
+    <div class="card project-card" draggable="true" data-id="${card.id}" data-status="${card.status}" data-project="${card.project}" data-completed-at="${card.completed_at || ''}">
+      <div class="card-header">
+        <span class="card-id">P#${card.id}</span>
+        ${agentBadge}
+        <button class="card-copy-btn" data-copy="P#${card.id} ${card.title}" title="Copy to clipboard">⎘</button>
+      </div>
+      <div class="card-title">${card.title}</div>
+      ${desc ? `<div class="card-desc">${desc}</div>` : ""}
+      ${linearLink}
+      ${milestonesHtml}
+      ${progressHtml}
+      <div class="card-footer">
+        ${projectBadge}
+        ${notesBadge}
+        ${dateBadge}
+      </div>
+      ${tags ? `<div class="card-tags">${tags}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderProjectColumn(key: string, label: string, icon: string, cards: ProjectCard[]): string {
+  const cardsHtml = cards.map(renderProjectCard).join("");
+  return `
+    <div class="column ${key}" data-column="${key}">
+      <div class="column-header">
+        <span>${icon} ${label}</span>
+        <div class="column-header-right">
+          <span class="count">${cards.length}</span>
+        </div>
+      </div>
+      <div class="column-body" data-column="${key}">
+        ${cardsHtml || '<div class="empty">No projects</div>'}
+      </div>
+    </div>
+  `;
+}
+
+async function loadProjectsBoard() {
+  const board = document.getElementById("projects-board")!;
+  const params = currentProject ? `?project=${encodeURIComponent(currentProject)}` : "";
+
+  try {
+    const res = await fetch(`/api/projects-board${params}`);
+    const data: ProjectsBoard = await res.json();
+
+    renderProjectFilter(data.projects);
+
+    board.innerHTML = PROJECT_COLUMNS.map((col) =>
+      renderProjectColumn(
+        col.key,
+        col.label,
+        col.icon,
+        data[col.key as keyof Omit<ProjectsBoard, "projects">]
+      )
+    ).join("");
+
+    const total = data.backlog.length + data.analyse.length + data.processing.length + data.done.length;
+    document.getElementById("count-summary")!.textContent =
+      `${data.done.length}/${total} projects completed`;
+
+    // Load progress for processing/done project cards
+    board.querySelectorAll<HTMLElement>("[data-project-card-id]").forEach(async (el) => {
+      const cardId = el.dataset.projectCardId;
+      const project = el.closest(".card")?.getAttribute("data-project");
+      if (!cardId || !project) return;
+      try {
+        const tasksRes = await fetch(`/api/project-card/${cardId}/tasks?project=${encodeURIComponent(project)}`);
+        const tasks: Task[] = await tasksRes.json();
+        const doneCount = tasks.filter(t => t.status === "done").length;
+        const pct = tasks.length > 0 ? Math.round((doneCount / tasks.length) * 100) : 0;
+        el.style.width = `${pct}%`;
+        const label = board.querySelector<HTMLElement>(`[data-project-progress-id="${cardId}"]`);
+        if (label) label.textContent = `${doneCount}/${tasks.length} tasks`;
+      } catch { /* ok */ }
+    });
+
+    // Card click → show project detail
+    board.querySelectorAll(".project-card").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        const copyBtn = (e.target as HTMLElement).closest(".card-copy-btn") as HTMLElement | null;
+        if (copyBtn) {
+          e.stopPropagation();
+          navigator.clipboard.writeText(copyBtn.dataset.copy!).then(() => {
+            const orig = copyBtn.textContent!;
+            copyBtn.textContent = "\u2713";
+            setTimeout(() => { copyBtn.textContent = orig; }, 1000);
+          });
+          return;
+        }
+        const id = parseInt((el as HTMLElement).dataset.id!);
+        const project = (el as HTMLElement).dataset.project;
+        showProjectDetail(id, project);
+      });
+    });
+
+  } catch (err) {
+    console.error("loadProjectsBoard failed:", err);
+    board.innerHTML = `
+      <div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;color:#ef4444;font-size:0.9rem;padding:48px">
+        Failed to load projects board
+      </div>
+    `;
+  }
+}
+
+async function showProjectDetail(id: number, project: string | null | undefined) {
+  const params = project ? `?project=${encodeURIComponent(project)}` : "";
+  const res = await fetch(`/api/project-card/${id}${params}`);
+  if (!res.ok) return;
+  const card: ProjectCard = await res.json();
+
+  // Fetch child tasks
+  const tasksRes = await fetch(`/api/project-card/${id}/tasks${params}`);
+  const childTasks: Task[] = tasksRes.ok ? await tasksRes.json() : [];
+
+  const milestones = parseJsonArray(card.milestones);
+  const doneCount = childTasks.filter(t => t.status === "done").length;
+  const pct = childTasks.length > 0 ? Math.round((doneCount / childTasks.length) * 100) : 0;
+
+  const descHtml = card.description ? simpleMarkdownToHtml(card.description) : "<em>No description</em>";
+
+  const linearLink = card.linear_project_url
+    ? `<a href="${card.linear_project_url}" target="_blank" style="color:#60a5fa">Open in Linear</a>`
+    : "";
+
+  // Group tasks by milestone
+  const tasksByMilestone = new Map<string, Task[]>();
+  for (const t of childTasks) {
+    const key = t.milestone_id || "ungrouped";
+    if (!tasksByMilestone.has(key)) tasksByMilestone.set(key, []);
+    tasksByMilestone.get(key)!.push(t);
+  }
+
+  let tasksHtml = "";
+  if (milestones.length > 0) {
+    for (const m of milestones) {
+      const mTasks = tasksByMilestone.get(m.linear_id || m.id) || [];
+      const mDone = mTasks.filter(t => t.status === "done").length;
+      tasksHtml += `<h3 style="margin-top:12px">${m.status === "done" ? "\u2705" : "\u{1F7E0}"} ${m.title} (${mDone}/${mTasks.length})</h3>`;
+      tasksHtml += mTasks.map(t =>
+        `<div style="padding:4px 0;display:flex;gap:8px;align-items:center">
+          <span class="badge ${t.status === 'done' ? 'review-approved' : 'status-' + t.status}" style="font-size:0.65rem">${t.status}</span>
+          <span style="cursor:pointer;color:#60a5fa" onclick="document.getElementById('modal-overlay').classList.add('hidden')">#${t.id}</span>
+          <span>${t.title}</span>
+        </div>`
+      ).join("");
+    }
+  } else if (childTasks.length > 0) {
+    tasksHtml = childTasks.map(t =>
+      `<div style="padding:4px 0;display:flex;gap:8px;align-items:center">
+        <span class="badge ${t.status === 'done' ? 'review-approved' : 'status-' + t.status}" style="font-size:0.65rem">${t.status}</span>
+        <span>#${t.id}</span>
+        <span>${t.title}</span>
+      </div>`
+    ).join("");
+  } else {
+    tasksHtml = "<em>No tasks yet</em>";
+  }
+
+  const agentLog = parseJsonArray(card.agent_log);
+  const agentLogHtml = agentLog.length > 0
+    ? `<details style="margin-top:16px"><summary style="cursor:pointer;color:#94a3b8">Agent Log (${agentLog.length})</summary>
+        ${agentLog.map(e => `<div style="padding:4px 0;font-size:0.75rem"><span class="badge agent-tag">${e.agent}</span> <span style="color:#64748b">${e.timestamp}</span> ${e.message || ""}</div>`).join("")}
+       </details>`
+    : "";
+
+  const notes = parseJsonArray(card.notes);
+  const notesHtml = notes.map(n =>
+    `<div style="padding:8px 0;border-bottom:1px solid #1e293b">
+      <div style="font-size:0.7rem;color:#64748b">${n.author} · ${n.timestamp}</div>
+      <div style="margin-top:4px">${simpleMarkdownToHtml(n.text)}</div>
+    </div>`
+  ).join("");
+
+  const content = document.getElementById("modal-content")!;
+  content.innerHTML = `
+    <div class="task-detail">
+      <div class="detail-header">
+        <span class="detail-id">P#${card.id}</span>
+        <span class="badge status-${card.status}">${card.status}</span>
+        ${linearLink}
+      </div>
+      <h1 style="font-size:1.15rem;margin:8px 0">${card.title}</h1>
+      <div style="font-size:0.75rem;color:#64748b;margin-bottom:12px">
+        Created: ${card.created_at}
+        ${card.started_at ? ` · Started: ${card.started_at}` : ""}
+        ${card.completed_at ? ` · Completed: ${card.completed_at}` : ""}
+      </div>
+
+      <div style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;font-size:0.75rem;margin-bottom:4px">
+          <span>Progress</span>
+          <span>${doneCount}/${childTasks.length} tasks (${pct}%)</span>
+        </div>
+        <div class="progress-bar" style="height:6px;background:#1e293b;border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:#4ade80;border-radius:3px;transition:width 0.3s"></div>
+        </div>
+      </div>
+
+      <section>
+        <h2 style="font-size:0.9rem;margin-bottom:8px">Description</h2>
+        <div class="md-content">${descHtml}</div>
+      </section>
+
+      <section style="margin-top:16px">
+        <h2 style="font-size:0.9rem;margin-bottom:8px">Tasks</h2>
+        ${tasksHtml}
+      </section>
+
+      ${agentLogHtml}
+
+      <section style="margin-top:16px">
+        <h2 style="font-size:0.9rem;margin-bottom:8px">Notes (${notes.length})</h2>
+        ${notesHtml}
+      </section>
+
+      <div style="margin-top:24px;padding-top:12px;border-top:1px solid #334155">
+        <button id="delete-project-btn" style="background:#dc2626;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.75rem">Delete Project Card</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("modal-overlay")!.classList.remove("hidden");
+
+  document.getElementById("delete-project-btn")!.addEventListener("click", async () => {
+    if (!confirm(`Delete project P#${card.id}?`)) return;
+    await fetch(`/api/project-card/${card.id}?project=${encodeURIComponent(card.project)}`, { method: "DELETE" });
+    document.getElementById("modal-overlay")!.classList.add("hidden");
+    loadProjectsBoard();
+  });
+}
+
 async function loadBoard() {
   const board = document.getElementById("board")!;
   const params = currentProject ? `?project=${encodeURIComponent(currentProject)}` : "";
@@ -1269,32 +1589,57 @@ fetch("/api/info")
 function switchView(view: "board" | "list") {
   currentView = view;
   const boardEl = document.getElementById("board")!;
+  const projectsBoardEl = document.getElementById("projects-board")!;
   const listEl = document.getElementById("list-view")!;
   const tabBoard = document.getElementById("tab-board")!;
   const tabList = document.getElementById("tab-list")!;
 
+  // Hide all views
+  boardEl.classList.add("hidden");
+  projectsBoardEl.classList.add("hidden");
+  listEl.classList.add("hidden");
+  tabBoard.classList.remove("active");
+  tabList.classList.remove("active");
+
   if (view === "board") {
-    boardEl.classList.remove("hidden");
-    listEl.classList.add("hidden");
     tabBoard.classList.add("active");
-    tabList.classList.remove("active");
-    loadBoard();
+    if (currentBoardType === "projects") {
+      projectsBoardEl.classList.remove("hidden");
+      loadProjectsBoard();
+    } else {
+      boardEl.classList.remove("hidden");
+      loadBoard();
+    }
   } else {
-    boardEl.classList.add("hidden");
-    listEl.classList.remove("hidden");
-    tabBoard.classList.remove("active");
     tabList.classList.add("active");
+    listEl.classList.remove("hidden");
     loadListView();
   }
 }
 
+function switchBoardType(type: "tasks" | "projects") {
+  currentBoardType = type;
+  localStorage.setItem('kanban-board-type', type);
+  const btnTasks = document.getElementById("type-tasks")!;
+  const btnProjects = document.getElementById("type-projects")!;
+  btnTasks.classList.toggle("active", type === "tasks");
+  btnProjects.classList.toggle("active", type === "projects");
+
+  // Reset to board view when switching type
+  switchView("board");
+}
+
 function refreshCurrentView() {
-  if (currentView === "board") loadBoard();
-  else loadListView();
+  if (currentView === "board") {
+    if (currentBoardType === "projects") loadProjectsBoard();
+    else loadBoard();
+  } else {
+    loadListView();
+  }
 }
 
 // Init
-loadBoard();
+switchBoardType(currentBoardType);
 
 // Restore persisted UI state
 (document.getElementById("sort-select") as HTMLSelectElement).value = currentSort;
@@ -1305,6 +1650,8 @@ if (hideOldDone) {
 // Tab switching
 document.getElementById("tab-board")!.addEventListener("click", () => switchView("board"));
 document.getElementById("tab-list")!.addEventListener("click", () => switchView("list"));
+document.getElementById("type-tasks")!.addEventListener("click", () => switchBoardType("tasks"));
+document.getElementById("type-projects")!.addEventListener("click", () => switchBoardType("projects"));
 
 // Auto-refresh every 10 seconds (pause when modal is open or dragging)
 setInterval(() => {

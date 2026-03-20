@@ -1,8 +1,8 @@
 ---
 name: kanban-run
 description: >
-  Run the AI team pipeline for kanban tasks — orchestration loop with 6 agents
-  (Planner, Critic, Builder, Shield, Inspector, Ranger). Use /kanban-run <ID> to execute.
+  Run the AI team pipeline for kanban tasks and projects — orchestration loop with 7 agents
+  (Analyst, Planner, Critic, Builder, Shield, Inspector, Ranger). Use /kanban-run <ID> to execute.
 ---
 
 > Shared context: `internal-kanban-shared` skill for DB path, pipeline, API, schema, formats.
@@ -11,8 +11,10 @@ description: >
 
 ### `/kanban-run <ID> [--auto]`
 
-**Default**: pause for user confirmation at plan_review and impl_review gates.
+**Default**: pause for user confirmation at review gates.
 **`--auto`**: fully automatic (circuit breaker still fires).
+
+Works for both **project cards** (P#ID) and **task cards** (#ID).
 
 ### `/kanban-run step <ID>`
 
@@ -22,7 +24,73 @@ Execute only the next pipeline step then exit.
 
 Trigger Inspector for a task in `impl_review` status.
 
-## Orchestration Loop (Level-Aware)
+## Card Type Detection
+
+At the start, determine whether the ID refers to a project card or a task card.
+
+If the user passes `P#<ID>` or mentions "project", try the projects API first:
+
+```bash
+curl -s "http://localhost:5173/api/project-card/$ID?project=$PROJECT"
+```
+
+If found → **Project Card Flow** (see below).
+If 404 → try task API → **Task Card Flow** (existing pipeline).
+
+## Project Card Flow
+
+### `/kanban-run P#<ID>` (explore only)
+
+```
+backlog → analyse (Analyst explores + creates milestones/issues/cards) → processing. Stop.
+```
+
+1. Read project card state
+2. Move to `analyse`:
+   ```bash
+   curl -s -X PATCH "http://localhost:5173/api/project-card/$ID?project=$PROJECT" \
+     -H 'Content-Type: application/json' \
+     -d '{"status": "analyse", "current_agent": "Analyst"}'
+   ```
+3. Dispatch Analyst:
+   ```
+   Agent(
+     subagent_type = "kanban:Analyst",
+     model = "opus",
+     mode = "auto",
+     prompt = "Kanban project P#<ID>, project: <PROJECT>\n\nTitle: <title>\nDescription: <description>\nLinear Project URL: <linear_project_url>\nLinear Project ID: <linear_project_id>"
+   )
+   ```
+4. After Analyst completes, append to project agent_log (same procedure as task agent_log but using `/api/project-card/$ID`)
+5. Move to `processing`:
+   ```bash
+   curl -s -X PATCH "http://localhost:5173/api/project-card/$ID?project=$PROJECT" \
+     -H 'Content-Type: application/json' \
+     -d '{"status": "processing", "current_agent": null}'
+   ```
+6. Report what was created and stop.
+
+### `/kanban-run P#<ID> --auto` (full pipeline)
+
+Same as above, then after moving to `processing`:
+
+7. Read the project card to get `milestones` and `task_index`
+8. For each milestone (in order by `id`):
+   a. Get all task cards with matching `milestone_id`:
+      ```bash
+      curl -s "http://localhost:5173/api/project-card/$ID/tasks?project=$PROJECT"
+      ```
+      Filter by `milestone_id` in your context.
+   b. For each task card in the milestone, run the existing **Task Card Flow** with `--auto`:
+      - Read task, dispatch agents per level (L1/L2/L3), commit, done
+   c. When all tasks in the milestone are done, close the milestone on Linear:
+      ```
+      Use mcp__plugin_linear_linear__save_milestone to update status to completed
+      ```
+9. When all milestones complete, the project card auto-moves to `done` (handled by API auto-completion hook).
+10. Close the Linear project if all milestones are done.
+
+## Task Card Flow (Orchestration Loop — Level-Aware)
 
 Read the task's `level` field first.
 

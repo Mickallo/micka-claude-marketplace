@@ -53,6 +53,16 @@ function getTransitions(level: number): Record<string, string[]> {
   };
 }
 
+// Valid status transitions for project cards
+function getProjectTransitions(): Record<string, string[]> {
+  return {
+    backlog:    ["analyse"],
+    analyse:    ["processing", "backlog"],
+    processing: ["done"],
+    done:       [],
+  };
+}
+
 // Project name → DB connection cache
 const _dbs = new Map<string, Database.Database>();
 
@@ -109,6 +119,33 @@ function getDb(project: string): Database.Database {
   try { db.exec(`ALTER TABLE tasks ADD COLUMN decision_log TEXT`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE tasks ADD COLUMN done_when TEXT`); } catch { /* exists */ }
 
+  // New columns for project-task linking
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN project_card_id INTEGER`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN milestone_id TEXT`); } catch { /* exists */ }
+
+  // Projects board table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'backlog',
+      description TEXT,
+      linear_project_id TEXT,
+      linear_project_url TEXT,
+      milestones TEXT,
+      task_index TEXT,
+      agent_log TEXT,
+      current_agent TEXT,
+      tags TEXT,
+      notes TEXT,
+      rank INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT
+    );
+  `);
+
   // Backfill rank for existing rows (rank=0) with 1000-unit spacing per project+status group
   db.exec(`
     UPDATE tasks SET rank = (
@@ -151,6 +188,33 @@ function renumberRanks(db: Database.Database, project: string, status: string) {
   }
 }
 
+// Auto-complete project card when all child tasks are done
+function checkProjectAutoComplete(db: Database.Database, taskId: number | string) {
+  const task = db
+    .prepare("SELECT project_card_id FROM tasks WHERE id = ?")
+    .get(taskId) as { project_card_id: number | null } | undefined;
+  if (!task?.project_card_id) return;
+
+  const pending = db
+    .prepare("SELECT COUNT(*) as count FROM tasks WHERE project_card_id = ? AND status != 'done'")
+    .get(task.project_card_id) as { count: number };
+
+  if (pending.count === 0) {
+    db.prepare("UPDATE projects SET status = 'done', completed_at = datetime('now') WHERE id = ? AND status = 'processing'")
+      .run(task.project_card_id);
+  }
+}
+
+function renumberProjectRanks(db: Database.Database, project: string, status: string) {
+  const rows = db
+    .prepare("SELECT id FROM projects WHERE project = ? AND status = ? ORDER BY rank, id")
+    .all(project, status) as { id: number }[];
+  const stmt = db.prepare("UPDATE projects SET rank = ? WHERE id = ?");
+  for (let i = 0; i < rows.length; i++) {
+    stmt.run((i + 1) * 1000, rows[i].id);
+  }
+}
+
 interface Task {
   id: number;
   project: string;
@@ -174,6 +238,8 @@ interface Task {
   notes: string | null;
   decision_log: string | null;
   done_when: string | null;
+  project_card_id: number | null;
+  milestone_id: string | null;
   created_at: string;
   started_at: string | null;
   planned_at: string | null;
@@ -190,6 +256,34 @@ interface Board {
   impl_review: Task[];
   test: Task[];
   done: Task[];
+  projects: string[];
+}
+
+interface ProjectCard {
+  id: number;
+  project: string;
+  title: string;
+  status: string;
+  description: string | null;
+  linear_project_id: string | null;
+  linear_project_url: string | null;
+  milestones: string | null;
+  task_index: string | null;
+  agent_log: string | null;
+  current_agent: string | null;
+  tags: string | null;
+  notes: string | null;
+  rank: number;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+interface ProjectsBoard {
+  backlog: ProjectCard[];
+  analyse: ProjectCard[];
+  processing: ProjectCard[];
+  done: ProjectCard[];
   projects: string[];
 }
 
@@ -417,6 +511,11 @@ export function kanbanApiPlugin(): Plugin {
               db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...values);
             }
 
+            // Auto-complete parent project if task moved to done
+            if (body.status === "done") {
+              checkProjectAutoComplete(db, id);
+            }
+
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ success: true }));
             return;
@@ -576,6 +675,8 @@ export function kanbanApiPlugin(): Plugin {
               ? typeof body.tags === "string" ? body.tags : JSON.stringify(body.tags)
               : null;
           const level = body.level !== undefined ? parseInt(body.level) || 3 : 3;
+          const projectCardId = body.project_card_id || null;
+          const milestoneId = body.milestone_id || null;
 
           const maxRankRow = db
             .prepare("SELECT MAX(rank) as maxRank FROM tasks WHERE project = ? AND status = 'todo'")
@@ -584,10 +685,10 @@ export function kanbanApiPlugin(): Plugin {
 
           const result = db
             .prepare(
-              `INSERT INTO tasks (project, title, priority, description, tags, rank, level)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO tasks (project, title, priority, description, tags, rank, level, project_card_id, milestone_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
-            .run(project, title, priority, description, tags, rank, level);
+            .run(project, title, priority, description, tags, rank, level, projectCardId, milestoneId);
 
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ success: true, id: result.lastInsertRowid }));
@@ -644,6 +745,10 @@ export function kanbanApiPlugin(): Plugin {
 
           vals.push(id);
           db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+
+          if (newStatus === "done") {
+            checkProjectAutoComplete(db, id);
+          }
 
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ success: true, newStatus, comment: newComment }));
@@ -737,6 +842,10 @@ export function kanbanApiPlugin(): Plugin {
 
           vals.push(id);
           db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+
+          if (newStatus === "done") {
+            checkProjectAutoComplete(db, id);
+          }
 
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ success: true, newStatus, result: newResult }));
@@ -942,6 +1051,383 @@ export function kanbanApiPlugin(): Plugin {
           res.setHeader("Content-Type", mimeTypes[ext] || "application/octet-stream");
           res.setHeader("Cache-Control", "public, max-age=86400");
           res.end(fs.readFileSync(filePath));
+          return;
+        }
+
+        // ── Projects Board API ──────────────────────────────
+
+        // GET /api/projects-board?project=xxx
+        if (pathname === "/api/projects-board") {
+          const projectParam = reqUrl.searchParams.get("project");
+          const allFiles = getAllDbFiles();
+
+          const projectSet = new Set<string>();
+          for (const file of allFiles) {
+            const pName = path.basename(file, ".db");
+            const pDb = getDb(pName);
+            const dbProjects = pDb
+              .prepare("SELECT DISTINCT project FROM projects")
+              .all() as { project: string }[];
+            for (const t of dbProjects) projectSet.add(t.project);
+            // Also include projects from tasks table
+            const dbTaskProjects = pDb
+              .prepare("SELECT DISTINCT project FROM tasks")
+              .all() as { project: string }[];
+            for (const t of dbTaskProjects) projectSet.add(t.project);
+            if (dbProjects.length === 0 && dbTaskProjects.length === 0) projectSet.add(pName);
+          }
+          const allProjectNames = [...projectSet].sort();
+
+          let cards: ProjectCard[];
+          if (projectParam) {
+            const db = getDb(projectParam);
+            cards = db
+              .prepare("SELECT * FROM projects WHERE project = ? ORDER BY rank, id")
+              .all(projectParam) as ProjectCard[];
+          } else {
+            cards = [];
+            for (const file of allFiles) {
+              const pName = path.basename(file, ".db");
+              const db = getDb(pName);
+              const dbCards = db
+                .prepare("SELECT * FROM projects ORDER BY rank, id")
+                .all() as ProjectCard[];
+              cards.push(...dbCards);
+            }
+          }
+
+          const grouped = new Map<string, ProjectCard[]>();
+          for (const c of cards) {
+            const arr = grouped.get(c.status);
+            if (arr) arr.push(c);
+            else grouped.set(c.status, [c]);
+          }
+          const board: ProjectsBoard = {
+            backlog: grouped.get("backlog") || [],
+            analyse: grouped.get("analyse") || [],
+            processing: grouped.get("processing") || [],
+            done: grouped.get("done") || [],
+            projects: allProjectNames,
+          };
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(board));
+          return;
+        }
+
+        // Route: /api/project-card/:id
+        const projectCardMatch = pathname.match(/^\/api\/project-card\/(\d+)$/);
+        if (projectCardMatch) {
+          const id = projectCardMatch[1];
+          const projectParam = reqUrl.searchParams.get("project");
+
+          // GET /api/project-card/:id
+          if (req.method === "GET") {
+            let card: ProjectCard | undefined;
+            if (projectParam) {
+              const db = getDb(projectParam);
+              card = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectCard | undefined;
+            } else {
+              for (const file of getAllDbFiles()) {
+                const pName = path.basename(file, ".db");
+                const db = getDb(pName);
+                const found = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectCard | undefined;
+                if (found) { card = found; break; }
+              }
+            }
+
+            if (!card) {
+              res.statusCode = 404;
+              res.end(JSON.stringify({ error: "Not found" }));
+              return;
+            }
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(card));
+            return;
+          }
+
+          // PATCH /api/project-card/:id?project=xxx
+          if (req.method === "PATCH") {
+            if (!projectParam) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "project query param required" }));
+              return;
+            }
+            const body = await parseBody(req);
+            const db = getDb(projectParam);
+
+            // Status transition validation
+            if (body.status !== undefined) {
+              const card = db
+                .prepare("SELECT status FROM projects WHERE id = ?")
+                .get(id) as { status: string } | undefined;
+              if (card) {
+                const transitions = getProjectTransitions();
+                const allowed = transitions[card.status];
+                if (allowed && !allowed.includes(body.status)) {
+                  res.statusCode = 400;
+                  res.end(JSON.stringify({
+                    error: `Invalid project transition: ${card.status} -> ${body.status}`,
+                    allowed,
+                  }));
+                  return;
+                }
+              }
+            }
+
+            const sets: string[] = [];
+            const values: any[] = [];
+
+            if (body.status !== undefined) {
+              sets.push("status = ?");
+              values.push(body.status);
+              if (body.status === "analyse") {
+                sets.push("started_at = COALESCE(started_at, datetime('now'))");
+              } else if (body.status === "done") {
+                sets.push("completed_at = datetime('now')");
+              } else if (body.status === "backlog") {
+                sets.push("started_at = NULL");
+                sets.push("completed_at = NULL");
+              }
+            }
+            if (body.title !== undefined) { sets.push("title = ?"); values.push(body.title); }
+            if (body.description !== undefined) { sets.push("description = ?"); values.push(body.description); }
+            if (body.linear_project_id !== undefined) { sets.push("linear_project_id = ?"); values.push(body.linear_project_id); }
+            if (body.linear_project_url !== undefined) { sets.push("linear_project_url = ?"); values.push(body.linear_project_url); }
+            if (body.milestones !== undefined) {
+              sets.push("milestones = ?");
+              values.push(typeof body.milestones === "string" ? body.milestones : JSON.stringify(body.milestones));
+            }
+            if (body.task_index !== undefined) {
+              sets.push("task_index = ?");
+              values.push(typeof body.task_index === "string" ? body.task_index : JSON.stringify(body.task_index));
+            }
+            if (body.agent_log !== undefined) {
+              sets.push("agent_log = ?");
+              values.push(typeof body.agent_log === "string" ? body.agent_log : JSON.stringify(body.agent_log));
+            }
+            if (body.current_agent !== undefined) { sets.push("current_agent = ?"); values.push(body.current_agent); }
+            if (body.tags !== undefined) {
+              sets.push("tags = ?");
+              values.push(typeof body.tags === "string" ? body.tags : JSON.stringify(body.tags));
+            }
+            if (body.rank !== undefined) { sets.push("rank = ?"); values.push(body.rank); }
+
+            if (sets.length > 0) {
+              values.push(id);
+              db.prepare(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+            }
+
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
+
+          // DELETE /api/project-card/:id?project=xxx
+          if (req.method === "DELETE") {
+            if (!projectParam) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "project query param required" }));
+              return;
+            }
+            const db = getDb(projectParam);
+            db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
+        }
+
+        // POST /api/project-card  (create new project card)
+        if (pathname === "/api/project-card" && req.method === "POST") {
+          const body = await parseBody(req);
+          const project = body.project;
+          if (!project) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "body.project is required" }));
+            return;
+          }
+
+          const db = getDb(project);
+          const title = body.title || "Untitled Project";
+          const description = body.description || null;
+          const linearProjectId = body.linear_project_id || null;
+          const linearProjectUrl = body.linear_project_url || null;
+          const tags = body.tags !== undefined
+            ? typeof body.tags === "string" ? body.tags : JSON.stringify(body.tags)
+            : null;
+
+          const maxRankRow = db
+            .prepare("SELECT MAX(rank) as maxRank FROM projects WHERE project = ? AND status = 'backlog'")
+            .get(project) as { maxRank: number | null } | undefined;
+          const rank = (maxRankRow?.maxRank ?? 0) + 1000;
+
+          const result = db
+            .prepare(
+              `INSERT INTO projects (project, title, description, linear_project_id, linear_project_url, tags, rank)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(project, title, description, linearProjectId, linearProjectUrl, tags, rank);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true, id: result.lastInsertRowid }));
+          return;
+        }
+
+        // GET /api/project-card/:id/tasks?project=xxx  (child tasks)
+        const projectTasksMatch = pathname.match(/^\/api\/project-card\/(\d+)\/tasks$/);
+        if (projectTasksMatch && req.method === "GET") {
+          const id = projectTasksMatch[1];
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
+          }
+          const db = getDb(projectParam);
+          const tasks = db
+            .prepare("SELECT * FROM tasks WHERE project_card_id = ? ORDER BY milestone_id, rank, id")
+            .all(id) as Task[];
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(tasks));
+          return;
+        }
+
+        // POST /api/project-card/:id/note?project=xxx
+        const projectNoteMatch = pathname.match(/^\/api\/project-card\/(\d+)\/note$/);
+        if (projectNoteMatch && req.method === "POST") {
+          const id = projectNoteMatch[1];
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
+          }
+          const body = await parseBody(req);
+          const db = getDb(projectParam);
+
+          const card = db
+            .prepare("SELECT notes FROM projects WHERE id = ?")
+            .get(id) as { notes: string | null } | undefined;
+
+          if (!card) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+
+          const notes = card.notes ? JSON.parse(card.notes) : [];
+          const note = {
+            id: Date.now(),
+            text: body.text || "",
+            author: body.author || "user",
+            timestamp: new Date().toISOString(),
+          };
+          notes.push(note);
+
+          db.prepare("UPDATE projects SET notes = ? WHERE id = ?").run(JSON.stringify(notes), id);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true, note }));
+          return;
+        }
+
+        // PATCH /api/project-card/:id/reorder?project=xxx
+        const projectReorderMatch = pathname.match(/^\/api\/project-card\/(\d+)\/reorder$/);
+        if (projectReorderMatch && req.method === "PATCH") {
+          const id = parseInt(projectReorderMatch[1]);
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
+          }
+          const body = await parseBody(req);
+          const db = getDb(projectParam);
+
+          const card = db
+            .prepare("SELECT * FROM projects WHERE id = ?")
+            .get(id) as ProjectCard | undefined;
+          if (!card) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+
+          const targetStatus = body.status || card.status;
+          const project = card.project;
+
+          // Status transition validation for drag-and-drop
+          if (targetStatus !== card.status) {
+            const transitions = getProjectTransitions();
+            const allowed = transitions[card.status];
+            if (allowed && !allowed.includes(targetStatus)) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({
+                error: `Invalid project transition: ${card.status} -> ${targetStatus}`,
+                allowed,
+              }));
+              return;
+            }
+
+            const sets: string[] = ["status = ?"];
+            const vals: any[] = [targetStatus];
+            if (targetStatus === "analyse") {
+              sets.push("started_at = COALESCE(started_at, datetime('now'))");
+            } else if (targetStatus === "done") {
+              sets.push("completed_at = datetime('now')");
+            } else if (targetStatus === "backlog") {
+              sets.push("started_at = NULL");
+              sets.push("completed_at = NULL");
+            }
+            vals.push(id);
+            db.prepare(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+          }
+
+          // Calculate new rank
+          let newRank: number;
+          const afterId = body.afterId as number | null;
+          const beforeId = body.beforeId as number | null;
+
+          if (afterId && beforeId) {
+            const above = db.prepare("SELECT rank FROM projects WHERE id = ?").get(afterId) as { rank: number } | undefined;
+            const below = db.prepare("SELECT rank FROM projects WHERE id = ?").get(beforeId) as { rank: number } | undefined;
+            if (above && below) {
+              newRank = Math.floor((above.rank + below.rank) / 2);
+              if (newRank === above.rank) {
+                renumberProjectRanks(db, project, targetStatus);
+                const a2 = db.prepare("SELECT rank FROM projects WHERE id = ?").get(afterId) as { rank: number };
+                const b2 = db.prepare("SELECT rank FROM projects WHERE id = ?").get(beforeId) as { rank: number };
+                newRank = Math.floor((a2.rank + b2.rank) / 2);
+              }
+            } else {
+              newRank = 1000;
+            }
+          } else if (afterId) {
+            const above = db.prepare("SELECT rank FROM projects WHERE id = ?").get(afterId) as { rank: number } | undefined;
+            newRank = above ? above.rank + 1000 : 1000;
+          } else if (beforeId) {
+            const below = db.prepare("SELECT rank FROM projects WHERE id = ?").get(beforeId) as { rank: number } | undefined;
+            if (below) {
+              newRank = Math.floor(below.rank / 2);
+              if (newRank === 0) {
+                renumberProjectRanks(db, project, targetStatus);
+                const b2 = db.prepare("SELECT rank FROM projects WHERE id = ?").get(beforeId) as { rank: number };
+                newRank = Math.floor(b2.rank / 2);
+              }
+            } else {
+              newRank = 1000;
+            }
+          } else {
+            newRank = 1000;
+          }
+
+          db.prepare("UPDATE projects SET rank = ? WHERE id = ?").run(newRank, id);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true, rank: newRank }));
           return;
         }
 

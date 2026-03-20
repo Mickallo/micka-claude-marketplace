@@ -67,12 +67,33 @@ sqlite3 ~/.claude/kanban-dbs/${PROJECT}.db "CREATE TABLE IF NOT EXISTS tasks (
   notes TEXT,
   decision_log TEXT,
   done_when TEXT,
+  project_card_id INTEGER,
+  milestone_id TEXT,
   rank INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   started_at TEXT,
   planned_at TEXT,
   reviewed_at TEXT,
   tested_at TEXT,
+  completed_at TEXT
+);"
+sqlite3 ~/.claude/kanban-dbs/${PROJECT}.db "CREATE TABLE IF NOT EXISTS projects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'backlog',
+  description TEXT,
+  linear_project_id TEXT,
+  linear_project_url TEXT,
+  milestones TEXT,
+  task_index TEXT,
+  agent_log TEXT,
+  current_agent TEXT,
+  tags TEXT,
+  notes TEXT,
+  rank INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  started_at TEXT,
   completed_at TEXT
 );"
 sqlite3 ~/.claude/kanban-dbs/${PROJECT}.db "PRAGMA journal_mode=DELETE;"
@@ -118,4 +139,5 @@ Project '<PROJECT_NAME>' registered.
   Stop:    /kanban-board-stop
 
 Add tasks with /kanban add <title>
+Add projects with /kanban add <linear-project-url>
 ```
