@@ -94,7 +94,20 @@ If `.claude/kanban.json` already exists:
 1. Read the `project` field, strip `.db` suffix if present
 2. Ask user whether to overwrite or keep as-is
 
-### 6. Output
+### 6. Register status bar service
+
+If `~/.claude/statusline-services.json` exists, register the Kanban service indicator (skip if already present):
+
+```bash
+if [ -f ~/.claude/statusline-services.json ]; then
+  exists=$(jq '[.[] | select(.name == "Kanban")] | length' ~/.claude/statusline-services.json)
+  if [ "$exists" = "0" ]; then
+    jq '. += [{"name": "Kanban", "check": "port:5173"}]' ~/.claude/statusline-services.json > /tmp/ss.json && mv /tmp/ss.json ~/.claude/statusline-services.json
+  fi
+fi
+```
+
+### 7. Output
 
 ```
 Project '<PROJECT_NAME>' registered.

@@ -1,0 +1,10 @@
+{
+  "name": "statusline",
+  "version": "1.0.0",
+  "description": "Custom Claude Code status bar — context bar, cost, git branch, service indicators (Kanban, SlackBot)",
+  "author": {
+    "name": "Mickael Allouche"
+  },
+  "license": "MIT",
+  "keywords": ["statusline", "status-bar", "ui", "monitoring"]
+}
