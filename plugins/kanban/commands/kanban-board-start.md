@@ -7,16 +7,25 @@ Start the kanban board dev server on http://localhost:5173.
 
 ## Procedure
 
-### 1. Check board is installed
+### 1. Resolve board path
+
+The board runs directly from the plugin source. Determine the path:
 
 ```bash
-if [ ! -f ~/.claude/kanban-board/package.json ]; then
-  echo "Board not installed. Run /kanban-init first."
-  exit 1
+echo "${CLAUDE_PLUGIN_ROOT}/kanban-board"
+```
+
+Store as `BOARD_DIR`. If `CLAUDE_PLUGIN_ROOT` is not set, fall back to `~/.claude/kanban-board` (legacy install).
+
+### 2. Ensure dependencies installed
+
+```bash
+if [ ! -d "$BOARD_DIR/node_modules" ]; then
+  pnpm --dir "$BOARD_DIR" install
 fi
 ```
 
-### 2. Check if already running
+### 3. Check if already running
 
 ```bash
 if lsof -iTCP:5173 -sTCP:LISTEN -t > /dev/null 2>&1; then
@@ -25,7 +34,7 @@ if lsof -iTCP:5173 -sTCP:LISTEN -t > /dev/null 2>&1; then
 fi
 ```
 
-### 3. Read project config
+### 4. Read project config
 
 ```bash
 if [ -f .claude/kanban.json ]; then
@@ -35,14 +44,14 @@ else
 fi
 ```
 
-### 4. Start server in background
+### 5. Start server in background
 
 ```bash
-nohup pnpm --dir ~/.claude/kanban-board dev > /tmp/kanban-board.log 2>&1 &
+nohup pnpm --dir "$BOARD_DIR" dev > /tmp/kanban-board.log 2>&1 &
 echo $! > /tmp/kanban-board.pid
 ```
 
-### 5. Output
+### 6. Output
 
 ```
 Kanban board started.

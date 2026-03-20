@@ -24,22 +24,17 @@ PROJECT=$(echo "$ARG" | sed 's/^-*//' | sed 's/\.db$//')
 PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
 ```
 
-### 2. Install board web (if not already installed)
+### 2. Install board dependencies
 
-The board source lives in the plugin at `kanban-board/`. If `~/.claude/kanban-board/package.json` doesn't exist, copy it and install deps.
+The board runs directly from the plugin source at `${CLAUDE_PLUGIN_ROOT}/kanban-board/`. No copy needed.
 
-The board source is at `${CLAUDE_PLUGIN_ROOT}/kanban-board/`.
-
-Copy and install if not already present:
+Install dependencies if not already present:
 
 ```bash
-if [ ! -f ~/.claude/kanban-board/package.json ]; then
-  cp -R "${CLAUDE_PLUGIN_ROOT}/kanban-board" ~/.claude/kanban-board
-  cd ~/.claude/kanban-board && pnpm install
+if [ ! -d "${CLAUDE_PLUGIN_ROOT}/kanban-board/node_modules" ]; then
+  pnpm --dir "${CLAUDE_PLUGIN_ROOT}/kanban-board" install
 fi
 ```
-
-If `~/.claude/kanban-board/package.json` already exists, skip this step.
 
 ### 3. Create DB
 
