@@ -36,6 +36,26 @@ The orchestrator provides: project card ID, project namespace, title, descriptio
 
 ## Procedure
 
+### ⓪ Ensure Clean Branch
+
+Before exploring, ensure the working directory is on the default branch and up to date:
+
+```bash
+git symbolic-ref refs/remotes/origin/HEAD
+```
+
+Parse the output to get the default branch name (e.g. `refs/remotes/origin/main` → `main`).
+
+```bash
+git checkout <default-branch>
+```
+
+```bash
+git pull --ff-only
+```
+
+If `git pull` fails (dirty worktree, merge conflicts), stop and report the error. Do not proceed with stale code.
+
 ### ① Deep Codebase Exploration
 
 Launch exploration across these areas IN ORDER:

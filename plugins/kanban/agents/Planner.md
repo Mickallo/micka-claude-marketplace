@@ -40,6 +40,18 @@ The orchestrator provides: task ID, project, title, description.
 
 ## Procedure
 
+0. **Ensure clean branch**: checkout the default branch and pull latest before exploring code:
+   ```bash
+   git symbolic-ref refs/remotes/origin/HEAD
+   ```
+   Parse to get branch name, then checkout and pull:
+   ```bash
+   git checkout <default-branch>
+   ```
+   ```bash
+   git pull --ff-only
+   ```
+   If pull fails, stop and report the error.
 1. Read the requirements carefully
 2. Analyze the codebase to understand current state
 3. Identify the **working directory** (which sub-project/folder the task targets)

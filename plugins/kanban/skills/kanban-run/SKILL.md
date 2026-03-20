@@ -52,7 +52,7 @@ backlog → analyse (Analyst explores + creates milestones/issues/cards) → pro
      -H 'Content-Type: application/json' \
      -d '{"status": "analyse", "current_agent": "Analyst"}'
    ```
-3. Dispatch Analyst:
+4. Dispatch Analyst:
    ```
    Agent(
      subagent_type = "kanban:Analyst",
@@ -61,14 +61,14 @@ backlog → analyse (Analyst explores + creates milestones/issues/cards) → pro
      prompt = "Kanban project P#<ID>, project: <PROJECT>\n\nTitle: <title>\nDescription: <description>\nLinear Project URL: <linear_project_url>\nLinear Project ID: <linear_project_id>"
    )
    ```
-4. After Analyst completes, append to project agent_log (same procedure as task agent_log but using `/api/project-card/$ID`)
-5. Move to `processing`:
+5. After Analyst completes, append to project agent_log (same procedure as task agent_log but using `/api/project-card/$ID`)
+6. Move to `processing`:
    ```bash
    curl -s -X PATCH "http://localhost:5173/api/project-card/$ID?project=$PROJECT" \
      -H 'Content-Type: application/json' \
      -d '{"status": "processing", "current_agent": null}'
    ```
-6. Report what was created and stop.
+7. Report what was created and stop.
 
 ### `/kanban-run P#<ID> --auto` (full pipeline)
 

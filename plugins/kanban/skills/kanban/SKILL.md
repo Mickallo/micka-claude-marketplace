@@ -130,15 +130,26 @@ Accept? [Y/n/1/2/3]
 #### Source: Linear
 
 1. Fetch the issue from Linear using available Linear MCP tools (search via `ToolSearch` `+linear`). Extract: title, description, priority, labels, state.
-2. Map Linear fields to kanban fields:
+2. **Fetch parent project context**: get the issue's project from Linear (via `get_project` or from the issue's `project` field). Extract: project name, description, target repos/services. This tells the agents **which codebase to work in**.
+3. Map Linear fields to kanban fields:
    - **title** ← issue title
-   - **description** ← issue description (markdown)
+   - **description** ← issue description (markdown) + project context block (see below)
    - **priority** ← `urgent`/`high` → `high`, `medium` → `medium`, `low`/`none` → `low`
    - **tags** ← issue labels as JSON array
-3. Run **Auto-Level Detection** on the imported title + description
-4. Show the imported data to user for confirmation before creating
-5. Create task (see below)
-6. Store the Linear issue identifier in a note on the task for traceability:
+4. **Append project context** to the description:
+   ```markdown
+
+   ---
+   ## Linear Context
+   **Project**: <project name>
+   **Project description**: <project description — first 500 chars>
+   **Issue**: <issue identifier>
+   ```
+   This section gives agents the context to understand which service/repo the task targets.
+5. Run **Auto-Level Detection** on the imported title + description
+6. Show the imported data to user for confirmation before creating
+7. Create task (see below)
+8. Store the Linear issue identifier in a note on the task for traceability:
    ```bash
    curl -s -X POST "http://localhost:5173/api/task/$ID/note?project=$PROJECT" \
      -H 'Content-Type: application/json' \
