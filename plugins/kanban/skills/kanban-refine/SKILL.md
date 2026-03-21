@@ -1,7 +1,7 @@
 ---
 name: kanban-refine
 description: >
-  Refine backlog requirements through structured user interview. Turns rough task
+  Refine task requirements through structured user interview. Turns rough task
   descriptions into concrete, actionable requirements with goal, scope, acceptance criteria.
 ---
 
@@ -16,10 +16,10 @@ Target: tasks in `todo` status. If not `todo`, warn and confirm before proceedin
 #### 1. Read the task
 
 ```bash
-curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT"
+curl -s "http://localhost:5173/api/task/$ID"
 ```
 
-Parse the JSON response to extract: title, description, priority, level, tags.
+Parse the JSON response to extract: title, description, priority, tags.
 
 #### 2. Display current state
 
@@ -85,9 +85,4 @@ Show the refined description. Ask user via AskUserQuestion:
 
 If approved:
 - PATCH `description` via API
-- Update `title`, `level`, `priority`, `tags` if discussed
-- Append to `agent_log`:
-
-```json
-{"agent": "Refiner", "model": "sonnet", "message": "Requirements refined. N questions across M rounds.", "timestamp": "..."}
-```
+- Update `title`, `priority`, `tags` if discussed

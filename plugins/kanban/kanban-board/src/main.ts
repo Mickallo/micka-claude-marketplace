@@ -1,128 +1,92 @@
+// ── Types ───────────────────────────────────────────────
+
+interface Block {
+  agent: string;
+  content: string;
+  decision_log: string;
+  verdict: "ok" | "nok";
+  timestamp: string;
+}
+
 interface Task {
   id: number;
-  project: string;
   title: string;
   status: string;
   priority: string;
+  pipeline: string;
   rank: number;
   description: string | null;
-  plan: string | null;
-  implementation_notes: string | null;
+  blocks: string;
+  loop_count: number;
   tags: string | null;
-  review_comments: string | null;
-  plan_review_comments: string | null;
-  test_results: string | null;
-  agent_log: string | null;
-  current_agent: string | null;
-  plan_review_count: number;
-  impl_review_count: number;
-  level: number;
   attachments: string | null;
   notes: string | null;
-  decision_log: string | null;
-  done_when: string | null;
-  created_at: string;
-  started_at: string | null;
-  planned_at: string | null;
-  reviewed_at: string | null;
-  tested_at: string | null;
-  completed_at: string | null;
-}
-
-interface Board {
-  todo: Task[];
-  plan: Task[];
-  plan_review: Task[];
-  impl: Task[];
-  impl_review: Task[];
-  test: Task[];
-  done: Task[];
-  projects: string[];
-}
-
-interface ProjectCard {
-  id: number;
-  project: string;
-  title: string;
-  status: string;
-  description: string | null;
-  linear_project_id: string | null;
-  linear_project_url: string | null;
-  milestones: string | null;
-  task_index: string | null;
-  agent_log: string | null;
-  current_agent: string | null;
-  tags: string | null;
-  notes: string | null;
-  rank: number;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
 }
 
-interface ProjectsBoard {
-  backlog: ProjectCard[];
-  analyse: ProjectCard[];
-  processing: ProjectCard[];
-  done: ProjectCard[];
-  projects: string[];
+interface PipelinesFile {
+  pipelines: Record<string, { stages: string[] }>;
+  default: string;
+  max_loops: number;
 }
 
-const PROJECT_COLUMNS = [
-  { key: "backlog",    label: "Backlog",    icon: "\u{1F4E5}" },
-  { key: "analyse",    label: "Analysis",   icon: "\u{1F50E}" },
-  { key: "processing", label: "Processing", icon: "\u{2699}\uFE0F" },
-  { key: "done",       label: "Done",       icon: "\u2705" },
-];
+interface BoardResponse {
+  columns: Record<string, Task[]>;
+  column_order: string[];
+  pipeline: string;
+  pipelines: string[];
+}
 
-const COLUMNS = [
-  { key: "todo",        label: "Requirements", icon: "\u{1F4CB}" },
-  { key: "plan",        label: "Plan",         icon: "\u{1F5FA}\uFE0F" },
-  { key: "plan_review", label: "Review Plan",  icon: "\u{1F50D}" },
-  { key: "impl",        label: "Implement",    icon: "\u{1F528}" },
-  { key: "impl_review", label: "Review Impl",  icon: "\u{1F4DD}" },
-  { key: "test",        label: "Test",         icon: "\u{1F9EA}" },
-  { key: "done",        label: "Done",         icon: "\u2705" },
-];
+// ── State ───────────────────────────────────────────────
 
-const STATUS_BADGES: Record<string, string> = {
-  plan:        "Planning",
-  plan_review: "Plan Review",
-  impl:        "Implementing",
-  impl_review: "Impl Review",
-  test:        "Testing",
-};
-
-let currentProject: string | null = localStorage.getItem('kanban-project');
+let currentPipeline: string = localStorage.getItem('kanban-pipeline') || '';
+let currentMaxLoops: number = 3;
 let isDragging = false;
 let currentView: "board" | "list" = "board";
-let currentBoardType: "tasks" | "projects" = (localStorage.getItem('kanban-board-type') as "tasks" | "projects") || "tasks";
-let currentSearch: string = '';
+let currentSearch = '';
 let currentSort: string = localStorage.getItem('kanban-sort') || 'default';
 let hideOldDone: boolean = localStorage.getItem('kanban-hide-old') === 'true';
+let cachedColumnOrder: string[] = [];
 
-function priorityClass(priority: string): string {
-  if (priority === "high") return "high";
-  if (priority === "medium") return "medium";
-  if (priority === "low") return "low";
-  return "";
+// ── Helpers ─────────────────────────────────────────────
+
+function priorityClass(p: string): string {
+  return p === "high" || p === "medium" || p === "low" ? p : "";
 }
 
-function isOlderThan3Days(dateStr: string): boolean {
-  if (!dateStr) return false;
-  return Date.now() - new Date(dateStr).getTime() > 3 * 24 * 60 * 60 * 1000;
+function isOlderThan3Days(d: string): boolean {
+  return d ? Date.now() - new Date(d).getTime() > 3 * 86400000 : false;
 }
 
 function sortTasks(tasks: Task[]): Task[] {
   if (currentSort === 'default') return tasks;
   return [...tasks].sort((a, b) => {
-    if (currentSort === 'created_asc')  return a.created_at.localeCompare(b.created_at);
+    if (currentSort === 'created_asc') return a.created_at.localeCompare(b.created_at);
     if (currentSort === 'created_desc') return b.created_at.localeCompare(a.created_at);
-    if (currentSort === 'completed_desc') {
-      return (b.completed_at || '').localeCompare(a.completed_at || '');
-    }
+    if (currentSort === 'completed_desc') return (b.completed_at || '').localeCompare(a.completed_at || '');
     return 0;
   });
+}
+
+function parseTags(tags: string | null): string[] {
+  if (!tags || tags === "null") return [];
+  try { const p = JSON.parse(tags); return Array.isArray(p) ? p : []; } catch { return []; }
+}
+
+function parseJsonArray(raw: string | null): any[] {
+  if (!raw || raw === "null") return [];
+  try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; }
+}
+
+function timeAgo(dateStr: string): string {
+  const days = Math.floor((Date.now() - new Date(dateStr + "Z").getTime()) / 86400000);
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  return dateStr.slice(0, 10);
 }
 
 function applySearchFilter() {
@@ -132,20 +96,17 @@ function applySearchFilter() {
   if (currentView === 'board') {
     document.querySelectorAll<HTMLElement>('.card').forEach(card => {
       const searchOk = !q || (() => {
-        const id    = card.dataset.id || '';
+        const id = card.dataset.id || '';
         const title = card.querySelector('.card-title')?.textContent?.toLowerCase() || '';
-        const desc  = card.querySelector('.card-desc')?.textContent?.toLowerCase() || '';
-        const tags  = [...card.querySelectorAll('.tag')].map(t => t.textContent?.toLowerCase() || '').join(' ');
+        const desc = card.querySelector('.card-desc')?.textContent?.toLowerCase() || '';
+        const tags = [...card.querySelectorAll('.tag')].map(t => t.textContent?.toLowerCase() || '').join(' ');
         return id === q || title.includes(q) || desc.includes(q) || tags.includes(q);
       })();
-      const doneHidden = hideOldDone
-        && card.dataset.status === 'done'
-        && isOlderThan3Days(card.dataset.completedAt || '');
+      const doneHidden = hideOldDone && card.dataset.status === 'done' && isOlderThan3Days(card.dataset.completedAt || '');
       card.style.display = (searchOk && !doneHidden) ? '' : 'none';
     });
-    // Update column counts: "visible/total" when any filter is active
     document.querySelectorAll<HTMLElement>('.column').forEach(col => {
-      const cards   = col.querySelectorAll<HTMLElement>('.card');
+      const cards = col.querySelectorAll<HTMLElement>('.card');
       const visible = [...cards].filter(c => c.style.display !== 'none').length;
       const countEl = col.querySelector<HTMLElement>('.count');
       if (countEl) countEl.textContent = anyFilter ? `${visible}/${cards.length}` : `${cards.length}`;
@@ -153,170 +114,19 @@ function applySearchFilter() {
   } else {
     document.querySelectorAll<HTMLElement>('#list-view tbody tr').forEach(row => {
       const searchOk = !q || (() => {
-        const id      = row.dataset.id || '';
-        const title   = row.querySelector('.col-title')?.textContent?.toLowerCase() || '';
-        const project = (row as HTMLTableRowElement).cells[5]?.textContent?.toLowerCase() || '';
-        const tags    = [...row.querySelectorAll('.tag')].map(t => t.textContent?.toLowerCase() || '').join(' ');
-        return id === q || title.includes(q) || project.includes(q) || tags.includes(q);
+        const id = row.dataset.id || '';
+        const title = row.querySelector('.col-title')?.textContent?.toLowerCase() || '';
+        const tags = [...row.querySelectorAll('.tag')].map(t => t.textContent?.toLowerCase() || '').join(' ');
+        return id === q || title.includes(q) || tags.includes(q);
       })();
-      const doneHidden = hideOldDone
-        && row.classList.contains('status-done')
-        && isOlderThan3Days(row.dataset.completedAt || '');
+      const doneHidden = hideOldDone && row.classList.contains('status-done') && isOlderThan3Days(row.dataset.completedAt || '');
       row.style.display = (searchOk && !doneHidden) ? '' : 'none';
     });
   }
 }
 
-function parseTags(tags: string | null): string[] {
-  if (!tags || tags === "null") return [];
-  try {
-    const parsed = JSON.parse(tags);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
+// ── Markdown ────────────────────────────────────────────
 
-function timeAgo(dateStr: string): string {
-  const d = new Date(dateStr + "Z");
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const days = Math.floor(diffMs / 86400000);
-  if (days === 0) return "today";
-  if (days === 1) return "yesterday";
-  if (days < 7) return `${days}d ago`;
-  if (days < 30) return `${Math.floor(days / 7)}w ago`;
-  return dateStr.slice(0, 10);
-}
-
-function parseJsonArray(raw: string | null): any[] {
-  if (!raw || raw === "null") return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function renderCard(task: Task): string {
-  const pClass = priorityClass(task.priority);
-  const priorityBadge = pClass
-    ? `<span class="badge ${pClass}">${task.priority}</span>`
-    : "";
-
-  const dateBadge = task.completed_at
-    ? `<span class="badge date">${task.completed_at.slice(0, 10)}</span>`
-    : task.created_at
-      ? `<span class="badge created">${timeAgo(task.created_at)}</span>`
-      : "";
-
-  const projectBadge =
-    !currentProject && task.project
-      ? `<span class="badge project">${task.project}</span>`
-      : "";
-
-  // Status badge for pipeline stages
-  const statusLabel = STATUS_BADGES[task.status];
-  const statusBadge = statusLabel
-    ? `<span class="badge status-${task.status}">${statusLabel}</span>`
-    : "";
-
-  // Level badge
-  const levelBadge = `<span class="badge level-${task.level}">L${task.level}</span>`;
-
-  // Agent tag
-  const agentBadge = task.current_agent
-    ? `<span class="badge agent-tag">${task.current_agent}</span>`
-    : "";
-
-  // Review badge (impl_review)
-  const reviewComments = parseJsonArray(task.review_comments);
-  const lastReview = reviewComments.length > 0 ? reviewComments[reviewComments.length - 1] : null;
-  const reviewBadge = lastReview
-    ? `<span class="badge ${lastReview.status === 'approved' ? 'review-approved' : 'review-changes'}">${
-        lastReview.status === 'approved' ? 'Approved' : 'Changes Req.'
-      }</span>`
-    : task.status === 'impl_review'
-      ? '<span class="badge review-pending">Awaiting Review</span>'
-      : '';
-
-  // Plan review badge
-  const planReviewComments = parseJsonArray(task.plan_review_comments);
-  const lastPlanReview = planReviewComments.length > 0 ? planReviewComments[planReviewComments.length - 1] : null;
-  const planReviewBadge = lastPlanReview
-    ? `<span class="badge ${lastPlanReview.status === 'approved' ? 'review-approved' : 'review-changes'}">${
-        lastPlanReview.status === 'approved' ? 'Plan OK' : 'Plan Changes'
-      }</span>`
-    : task.status === 'plan_review'
-      ? '<span class="badge review-pending">Plan Review</span>'
-      : '';
-
-  const tags = parseTags(task.tags)
-    .map((t) => `<span class="tag">${t}</span>`)
-    .join("");
-
-  const desc = task.description
-    ? task.description.split("\n")[0].slice(0, 80)
-    : "";
-
-  // Notes count
-  const noteCount = parseJsonArray(task.notes).length;
-  const notesBadge = noteCount > 0
-    ? `<span class="badge notes-count" title="${noteCount} note(s)">\u{1F4AC} ${noteCount}</span>`
-    : "";
-
-  return `
-    <div class="card" draggable="true" data-id="${task.id}" data-status="${task.status}" data-project="${task.project}" data-completed-at="${task.completed_at || ''}">
-      <div class="card-header">
-        <span class="card-id">#${task.id}</span>
-        ${levelBadge}
-        ${priorityBadge}
-        ${statusBadge}
-        ${agentBadge}
-        <button class="card-copy-btn" data-copy="#${task.id} ${task.title}" title="Copy to clipboard">⎘</button>
-      </div>
-      <div class="card-title">${task.title}</div>
-      ${desc ? `<div class="card-desc">${desc}</div>` : ""}
-      <div class="card-footer">
-        ${projectBadge}
-        ${planReviewBadge}
-        ${reviewBadge}
-        ${notesBadge}
-        ${dateBadge}
-      </div>
-      ${tags ? `<div class="card-tags">${tags}</div>` : ""}
-    </div>
-  `;
-}
-
-function renderColumn(
-  key: string,
-  label: string,
-  icon: string,
-  tasks: Task[]
-): string {
-  const cardsHtml = sortTasks(tasks).map(renderCard).join("");
-  const addBtn = key === "todo"
-    ? `<button class="add-card-btn" id="add-card-btn" title="Add card">+</button>`
-    : "";
-  return `
-    <div class="column ${key}" data-column="${key}">
-      <div class="column-header">
-        <span>${icon} ${label}</span>
-        <div class="column-header-right">
-          ${addBtn}
-          <span class="count">${tasks.length}</span>
-        </div>
-      </div>
-      <div class="column-body" data-column="${key}">
-        ${cardsHtml || '<div class="empty">No items</div>'}
-      </div>
-    </div>
-  `;
-}
-
-// Hoisted RegExp constants for simpleMarkdownToHtml (avoid re-creation per call)
 const RE_CODE_BLOCK = /```[\s\S]*?```/g;
 const RE_CODE_OPEN = /```\w*\n?/;
 const RE_CODE_CLOSE = /```$/;
@@ -331,1243 +141,661 @@ const RE_UL = /^[-*]\s+(.+)$/;
 const RE_OL = /^\d+\.\s+(.+)$/;
 const RE_TABLE_ROW = /^\|(.+)\|$/;
 const RE_TABLE_SEP = /^\|[\s:-]+\|$/;
-
 let mermaidCounter = 0;
 
-function simpleMarkdownToHtml(md: string): string {
-  // Extract code blocks first to protect them (mermaid gets special treatment)
+function md(text: string): string {
   const codeBlocks: string[] = [];
-  let text = md.replace(RE_CODE_BLOCK, (match) => {
+  let s = text.replace(RE_CODE_BLOCK, (match) => {
     if (RE_MERMAID_OPEN.test(match)) {
       const diagram = match.replace(RE_MERMAID_OPEN, "").replace(RE_CODE_CLOSE, "").trim();
-      const id = `mermaid-${++mermaidCounter}`;
-      codeBlocks.push(`<pre class="mermaid" id="${id}">${diagram}</pre>`);
+      codeBlocks.push(`<pre class="mermaid" id="mermaid-${++mermaidCounter}">${diagram}</pre>`);
     } else {
-      const code = match.replace(RE_CODE_OPEN, "").replace(RE_CODE_CLOSE, "");
-      codeBlocks.push(`<pre><code>${code}</code></pre>`);
+      codeBlocks.push(`<pre><code>${match.replace(RE_CODE_OPEN, "").replace(RE_CODE_CLOSE, "")}</code></pre>`);
     }
     return `\x00CB${codeBlocks.length - 1}\x00`;
   });
+  s = s.replace(RE_BOLD, "<strong>$1</strong>").replace(RE_INLINE_CODE, "<code>$1</code>");
 
-  // Inline formatting
-  text = text
-    .replace(RE_BOLD, "<strong>$1</strong>")
-    .replace(RE_INLINE_CODE, "<code>$1</code>");
-
-  // Process line by line to build proper block structure
-  const lines = text.split("\n");
-  const out: string[] = [];
-  let inUl = false;
-  let inOl = false;
-
-  function closeLists() {
-    if (inUl) { out.push("</ul>"); inUl = false; }
-    if (inOl) { out.push("</ol>"); inOl = false; }
-  }
+  const lines = s.split("\n"), out: string[] = [];
+  let inUl = false, inOl = false;
+  const closeLists = () => { if (inUl) { out.push("</ul>"); inUl = false; } if (inOl) { out.push("</ol>"); inOl = false; } };
 
   let i = 0;
   while (i < lines.length) {
-    const trimmed = lines[i].trim();
-
-    // Code block placeholder
-    const cbMatch = trimmed.match(RE_CB_PLACEHOLDER);
-    if (cbMatch) {
+    const t = lines[i].trim();
+    const cb = t.match(RE_CB_PLACEHOLDER);
+    if (cb) { closeLists(); out.push(codeBlocks[parseInt(cb[1])]); i++; continue; }
+    if (RE_TABLE_ROW.test(t)) {
       closeLists();
-      out.push(codeBlocks[parseInt(cbMatch[1])]);
-      i++; continue;
-    }
-
-    // Markdown table: detect consecutive pipe rows
-    if (RE_TABLE_ROW.test(trimmed)) {
-      closeLists();
-      const tableRows: string[] = [];
-      while (i < lines.length && RE_TABLE_ROW.test(lines[i].trim())) {
-        tableRows.push(lines[i].trim());
-        i++;
-      }
-      if (tableRows.length >= 2) {
-        // Check if row[1] is separator
-        const hasSep = RE_TABLE_SEP.test(tableRows[1]);
-        const headerRow = hasSep ? tableRows[0] : null;
-        const dataStart = hasSep ? 2 : 0;
-
-        let tableHtml = '<table class="md-table">';
-        if (headerRow) {
-          const cells = headerRow.slice(1, -1).split("|").map(c => c.trim());
-          tableHtml += "<thead><tr>" + cells.map(c => `<th>${c}</th>`).join("") + "</tr></thead>";
-        }
-        tableHtml += "<tbody>";
-        for (let r = dataStart; r < tableRows.length; r++) {
-          if (RE_TABLE_SEP.test(tableRows[r])) continue;
-          const cells = tableRows[r].slice(1, -1).split("|").map(c => c.trim());
-          tableHtml += "<tr>" + cells.map(c => `<td>${c}</td>`).join("") + "</tr>";
-        }
-        tableHtml += "</tbody></table>";
-        out.push(tableHtml);
-      } else {
-        // Single pipe row, treat as paragraph
-        out.push(`<p>${tableRows[0]}</p>`);
-      }
+      const rows: string[] = [];
+      while (i < lines.length && RE_TABLE_ROW.test(lines[i].trim())) { rows.push(lines[i].trim()); i++; }
+      if (rows.length >= 2) {
+        const hasSep = RE_TABLE_SEP.test(rows[1]);
+        let h = '<table class="md-table">';
+        if (hasSep) { const cells = rows[0].slice(1, -1).split("|").map(c => c.trim()); h += "<thead><tr>" + cells.map(c => `<th>${c}</th>`).join("") + "</tr></thead>"; }
+        h += "<tbody>";
+        for (let r = hasSep ? 2 : 0; r < rows.length; r++) { if (RE_TABLE_SEP.test(rows[r])) continue; const cells = rows[r].slice(1, -1).split("|").map(c => c.trim()); h += "<tr>" + cells.map(c => `<td>${c}</td>`).join("") + "</tr>"; }
+        h += "</tbody></table>"; out.push(h);
+      } else { out.push(`<p>${rows[0]}</p>`); }
       continue;
     }
-
-    // Headings
-    const h3 = trimmed.match(RE_H3);
-    if (h3) { closeLists(); out.push(`<h3>${h3[1]}</h3>`); i++; continue; }
-    const h2 = trimmed.match(RE_H2);
-    if (h2) { closeLists(); out.push(`<h2>${h2[1]}</h2>`); i++; continue; }
-    const h1 = trimmed.match(RE_H1);
-    if (h1) { closeLists(); out.push(`<h1>${h1[1]}</h1>`); i++; continue; }
-
-    // Unordered list
-    const ul = trimmed.match(RE_UL);
-    if (ul) {
-      if (inOl) { out.push("</ol>"); inOl = false; }
-      if (!inUl) { out.push("<ul>"); inUl = true; }
-      out.push(`<li>${ul[1]}</li>`);
-      i++; continue;
-    }
-
-    // Ordered list
-    const ol = trimmed.match(RE_OL);
-    if (ol) {
-      if (inUl) { out.push("</ul>"); inUl = false; }
-      if (!inOl) { out.push("<ol>"); inOl = true; }
-      out.push(`<li>${ol[1]}</li>`);
-      i++; continue;
-    }
-
-    // Close open lists on non-list lines
+    const h3 = t.match(RE_H3); if (h3) { closeLists(); out.push(`<h3>${h3[1]}</h3>`); i++; continue; }
+    const h2 = t.match(RE_H2); if (h2) { closeLists(); out.push(`<h2>${h2[1]}</h2>`); i++; continue; }
+    const h1 = t.match(RE_H1); if (h1) { closeLists(); out.push(`<h1>${h1[1]}</h1>`); i++; continue; }
+    const ul = t.match(RE_UL); if (ul) { if (inOl) { out.push("</ol>"); inOl = false; } if (!inUl) { out.push("<ul>"); inUl = true; } out.push(`<li>${ul[1]}</li>`); i++; continue; }
+    const ol = t.match(RE_OL); if (ol) { if (inUl) { out.push("</ul>"); inUl = false; } if (!inOl) { out.push("<ol>"); inOl = true; } out.push(`<li>${ol[1]}</li>`); i++; continue; }
     closeLists();
-
-    // Empty line = paragraph break, non-empty = paragraph
-    if (trimmed === "") {
-      out.push("");
-    } else {
-      out.push(`<p>${trimmed}</p>`);
-    }
+    out.push(t === "" ? "" : `<p>${t}</p>`);
     i++;
   }
   closeLists();
-
   return out.join("\n");
 }
 
-async function renderMermaidDiagrams(container: HTMLElement) {
-  const mermaid = (window as any).__mermaid;
-  if (!mermaid) return;
-  const elements = container.querySelectorAll("pre.mermaid");
-  if (elements.length === 0) return;
-  try {
-    await mermaid.run({ nodes: elements });
-  } catch (e) {
-    console.warn("Mermaid render failed:", e);
-  }
+async function renderMermaid(container: HTMLElement) {
+  const m = (window as any).__mermaid;
+  if (!m) return;
+  const els = container.querySelectorAll("pre.mermaid");
+  if (els.length > 0) try { await m.run({ nodes: els }); } catch { /* ok */ }
 }
 
-function renderLifecycleSection(
-  phase: string,
-  icon: string,
-  colorClass: string,
-  content: string | null,
-  isActive: boolean
-): string {
-  if (!content && !isActive) return '';
-  const body = content
-    ? simpleMarkdownToHtml(content)
-    : `<span class="phase-empty">Not yet documented</span>`;
+// ── Card rendering ──────────────────────────────────────
+
+function renderCard(task: Task): string {
+  const pBadge = priorityClass(task.priority) ? `<span class="badge ${task.priority}">${task.priority}</span>` : "";
+  const dateBadge = task.completed_at
+    ? `<span class="badge date">${task.completed_at.slice(0, 10)}</span>`
+    : task.created_at ? `<span class="badge created">${timeAgo(task.created_at)}</span>` : "";
+
+  const isBlocked = task.loop_count >= currentMaxLoops;
+  const blockedBadge = isBlocked ? `<span class="badge blocked">BLOCKED</span>` : "";
+
+  const blocks: Block[] = parseJsonArray(task.blocks);
+  const last = blocks.length > 0 ? blocks[blocks.length - 1] : null;
+  const verdictBadge = last
+    ? `<span class="badge ${last.verdict === 'ok' ? 'verdict-ok' : 'verdict-nok'}">${last.agent}: ${last.verdict}</span>` : "";
+
+  const tags = parseTags(task.tags).map(t => `<span class="tag">${t}</span>`).join("");
+  const desc = task.description ? task.description.split("\n")[0].slice(0, 80) : "";
+  const noteCount = parseJsonArray(task.notes).length;
+  const notesBadge = noteCount > 0 ? `<span class="badge notes-count" title="${noteCount} note(s)">\u{1F4AC} ${noteCount}</span>` : "";
+
   return `
-    <div class="lifecycle-phase ${colorClass} ${isActive ? 'active' : ''}">
-      <div class="phase-header">
-        <span class="phase-icon">${icon}</span>
-        <span class="phase-label">${phase}</span>
+    <div class="card ${isBlocked ? 'card-blocked' : ''}" draggable="true" data-id="${task.id}" data-status="${task.status}" data-completed-at="${task.completed_at || ''}">
+      <div class="card-header">
+        <span class="card-id">#${task.id}</span>
+        ${pBadge}${blockedBadge}${verdictBadge}
       </div>
-      <div class="phase-body">${body}</div>
-    </div>
-  `;
+      <div class="card-title">${task.title}</div>
+      ${desc ? `<div class="card-desc">${desc}</div>` : ""}
+      <div class="card-footer">${notesBadge}${dateBadge}</div>
+      ${tags ? `<div class="card-tags">${tags}</div>` : ""}
+    </div>`;
 }
 
-function renderReviewEntries(comments: any[]): string {
-  if (comments.length === 0) return '';
-  return comments.map((rc: any) => `
-    <div class="review-entry ${rc.status}">
-      <div class="review-header">
-        <span class="badge ${rc.status === 'approved' ? 'review-approved' : 'review-changes'}">
-          ${rc.status === 'approved' ? 'Approved' : 'Changes Requested'}
-        </span>
-        <span class="review-meta">${rc.reviewer || ''} &middot; ${rc.timestamp?.slice(0, 16) || ''}</span>
+function renderColumn(key: string, label: string, tasks: Task[]): string {
+  const addBtn = key === "todo" ? `<button class="add-card-btn" id="add-card-btn" title="Add card">+</button>` : "";
+  return `
+    <div class="column ${key}" data-column="${key}">
+      <div class="column-header">
+        <span>${label}</span>
+        <div class="column-header-right">${addBtn}<span class="count">${tasks.length}</span></div>
       </div>
-      <div class="review-comment">${simpleMarkdownToHtml(rc.comment || '')}</div>
-    </div>
-  `).join('');
+      <div class="column-body" data-column="${key}">
+        ${sortTasks(tasks).map(renderCard).join("") || '<div class="empty">No items</div>'}
+      </div>
+    </div>`;
 }
 
-function renderTestEntries(results: any[]): string {
-  if (results.length === 0) return '';
-  return results.map((r: any) => `
-    <div class="review-entry ${r.status === 'pass' ? 'approved' : 'changes_requested'}">
-      <div class="review-header">
-        <span class="badge ${r.status === 'pass' ? 'review-approved' : 'review-changes'}">
-          ${r.status === 'pass' ? 'Pass' : 'Fail'}
-        </span>
-        <span class="review-meta">${r.tester || ''} &middot; ${r.timestamp?.slice(0, 16) || ''}</span>
-      </div>
-      ${r.lint ? `<div class="test-output"><strong>Lint:</strong> <pre>${r.lint}</pre></div>` : ''}
-      ${r.build ? `<div class="test-output"><strong>Build:</strong> <pre>${r.build}</pre></div>` : ''}
-      ${r.tests ? `<div class="test-output"><strong>Tests:</strong> <pre>${r.tests}</pre></div>` : ''}
-      ${r.comment ? `<div class="review-comment">${simpleMarkdownToHtml(r.comment)}</div>` : ''}
-    </div>
-  `).join('');
-}
+// ── Task Detail ─────────────────────────────────────────
 
-async function uploadFiles(taskId: number, files: FileList | File[], project: string) {
+async function uploadFiles(taskId: number, files: FileList | File[]) {
   for (const file of Array.from(files)) {
     if (!file.type.startsWith("image/")) continue;
-    const reader = new FileReader();
-    const data: string = await new Promise((resolve) => {
-      reader.onload = () => resolve(reader.result as string);
-      reader.readAsDataURL(file);
-    });
-    await fetch(`/api/task/${taskId}/attachment?project=${encodeURIComponent(project)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const data: string = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(file); });
+    await fetch(`/api/task/${taskId}/attachment`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filename: file.name, data }),
     });
   }
-  showTaskDetail(taskId, project);
+  showTaskDetail(taskId);
 }
 
-async function showTaskDetail(id: number, project?: string) {
+async function showTaskDetail(id: number) {
   const overlay = document.getElementById("modal-overlay")!;
   const content = document.getElementById("modal-content")!;
   content.innerHTML = '<div style="color:#94a3b8">Loading...</div>';
   overlay.classList.remove("hidden");
 
   try {
-    const projectParam = project ? `?project=${encodeURIComponent(project)}` : "";
-    const res = await fetch(`/api/task/${id}${projectParam}`);
-    const task: Task = await res.json();
+    const task: Task = await (await fetch(`/api/task/${id}`)).json();
+    const columns = ["todo", ...(cachedColumnOrder.slice(1, -1)), "done"];
+    const currentIdx = Math.max(0, columns.indexOf(task.status));
 
     const tags = parseTags(task.tags);
-    const tagsHtml = tags.length
-      ? `<div class="modal-tags">${tags.map((t) => `<span class="tag">${t}</span>`).join("")}</div>`
-      : "";
+    const tagsHtml = tags.length ? `<div class="modal-tags">${tags.map(t => `<span class="tag">${t}</span>`).join("")}</div>` : "";
 
     const meta = [
-      `<strong>Project:</strong> ${task.project}`,
+      `<strong>Pipeline:</strong> ${task.pipeline}`,
       `<strong>Status:</strong> ${task.status}`,
       `<strong>Priority:</strong> ${task.priority}`,
       `<strong>Created:</strong> ${task.created_at?.slice(0, 10) || "-"}`,
-      task.started_at
-        ? `<strong>Started:</strong> ${task.started_at.slice(0, 10)}`
-        : "",
-      task.planned_at
-        ? `<strong>Planned:</strong> ${task.planned_at.slice(0, 10)}`
-        : "",
-      task.reviewed_at
-        ? `<strong>Reviewed:</strong> ${task.reviewed_at.slice(0, 10)}`
-        : "",
-      task.tested_at
-        ? `<strong>Tested:</strong> ${task.tested_at.slice(0, 10)}`
-        : "",
-      task.completed_at
-        ? `<strong>Completed:</strong> ${task.completed_at.slice(0, 10)}`
-        : "",
-    ]
-      .filter(Boolean)
-      .join(" &nbsp;|&nbsp; ");
+      task.started_at ? `<strong>Started:</strong> ${task.started_at.slice(0, 10)}` : "",
+      task.completed_at ? `<strong>Completed:</strong> ${task.completed_at.slice(0, 10)}` : "",
+    ].filter(Boolean).join(" &nbsp;|&nbsp; ");
 
-    // Level-aware progress bar
-    const levelPhases: Record<number, { labels: string[]; statuses: string[] }> = {
-      1: { labels: ['Req', 'Impl', 'Done'], statuses: ['todo', 'impl', 'done'] },
-      2: { labels: ['Req', 'Plan', 'Impl', 'Review', 'Done'], statuses: ['todo', 'plan', 'impl', 'impl_review', 'done'] },
-      3: { labels: ['Req', 'Plan', 'Plan Rev', 'Impl', 'Impl Rev', 'Test', 'Done'], statuses: ['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done'] },
-    };
-    const lp = levelPhases[task.level] || levelPhases[3];
-    const currentPhase = Math.max(0, lp.statuses.indexOf(task.status));
+    const progressHtml = `<div class="lifecycle-progress">${columns.map((col, i) => `
+      <div class="progress-step ${i < currentIdx ? 'completed' : ''} ${i === currentIdx ? 'current' : ''}">
+        <div class="step-dot"></div><span class="step-label">${col === 'todo' ? 'Todo' : col === 'done' ? 'Done' : col}</span>
+      </div>`).join('<div class="progress-line"></div>')}</div>`;
 
-    const progressHtml = `
-      <div class="lifecycle-progress">
-        <span class="level-indicator">L${task.level}</span>
-        ${lp.labels.map((p, i) => `
-          <div class="progress-step ${i < currentPhase ? 'completed' : ''} ${i === currentPhase ? 'current' : ''}">
-            <div class="step-dot"></div>
-            <span class="step-label">${p}</span>
-          </div>
-        `).join('<div class="progress-line"></div>')}
-      </div>
-    `;
+    const isBlocked = task.loop_count >= currentMaxLoops;
+    const blockedHtml = isBlocked
+      ? `<div class="blocked-banner"><strong>BLOCKED</strong> — ${task.loop_count} failed loops (max: ${currentMaxLoops}). Add a comment to unblock.</div>` : "";
 
-    // Attachments
     const attachments = parseJsonArray(task.attachments);
     const attachmentsHtml = attachments.length > 0
       ? `<div class="attachments-grid">${attachments.map((a: any) =>
-          `<div class="attachment-thumb" data-stored="${a.storedName}">
-            <img src="${a.url}" alt="${a.filename}" loading="lazy" />
-            <button class="attachment-remove" data-id="${id}" data-name="${a.storedName}" title="Remove">&times;</button>
-            <span class="attachment-name">${a.filename}</span>
-          </div>`
-        ).join('')}</div>`
-      : '';
+          `<div class="attachment-thumb"><img src="${a.url}" alt="${a.filename}" loading="lazy" /><button class="attachment-remove" data-id="${id}" data-name="${a.storedName}">&times;</button></div>`
+        ).join('')}</div>` : '';
 
-    // Requirements section (editable + level + attachments)
-    const reqBody = task.description
-      ? simpleMarkdownToHtml(task.description)
-      : `<span class="phase-empty">Not yet documented</span>`;
-    const levelOptions = [1, 2, 3].map(l =>
-      `<option value="${l}" ${l === task.level ? 'selected' : ''}>L${l}</option>`
-    ).join('');
+    const reqBody = task.description ? md(task.description) : `<span class="phase-empty">Not yet documented</span>`;
     const requirementSection = `
-      <div class="lifecycle-phase phase-requirement ${currentPhase === 0 ? 'active' : ''}">
-        <div class="phase-header">
-          <span class="phase-icon">\u{1F4CB}</span>
-          <span class="phase-label">Requirements</span>
-          <select class="level-select" id="level-select" title="Pipeline Level">${levelOptions}</select>
-          <button class="phase-edit-btn" id="req-edit-btn" title="Edit">&#9998;</button>
-        </div>
-        <div class="phase-body" id="req-body-view">
-          ${reqBody}
-          ${attachmentsHtml}
-        </div>
+      <div class="lifecycle-phase phase-requirement ${currentIdx === 0 ? 'active' : ''}">
+        <div class="phase-header"><span class="phase-icon">\u{1F4CB}</span><span class="phase-label">Requirements</span>
+          <button class="phase-edit-btn" id="req-edit-btn">&#9998;</button></div>
+        <div class="phase-body" id="req-body-view">${reqBody}${attachmentsHtml}</div>
         <div class="phase-body hidden" id="req-body-edit">
           <textarea id="req-textarea" rows="8">${(task.description || '').replace(/</g, '&lt;')}</textarea>
-          <div class="attachment-drop-zone" id="attachment-drop-zone">
-            <span>\u{1F4CE} Drop images here or click to attach</span>
-            <input type="file" id="attachment-input" accept="image/*" multiple hidden />
-          </div>
-          ${attachmentsHtml ? `<div id="edit-attachments">${attachmentsHtml}</div>` : ''}
-          <div class="phase-edit-actions">
-            <button class="phase-save-btn" id="req-save-btn">Save</button>
-            <button class="phase-cancel-btn" id="req-cancel-btn">Cancel</button>
-          </div>
+          <div class="attachment-drop-zone" id="attachment-drop-zone"><span>\u{1F4CE} Drop images here or click</span><input type="file" id="attachment-input" accept="image/*" multiple hidden /></div>
+          <div class="phase-edit-actions"><button class="phase-save-btn" id="req-save-btn">Save</button><button class="phase-cancel-btn" id="req-cancel-btn">Cancel</button></div>
         </div>
-      </div>
-    `;
+      </div>`;
 
-    // Plan section
-    const planSection = renderLifecycleSection(
-      'Plan', '\u{1F5FA}\uFE0F', 'phase-plan',
-      task.plan, currentPhase === 1 && !task.plan
-    );
-
-    // Decision Log section (after plan, before plan review)
-    let decisionLogSection = '';
-    if (task.decision_log) {
-      decisionLogSection = renderLifecycleSection(
-        'Decision Log', '🧭', 'phase-decision-log',
-        task.decision_log, false
-      );
-    }
-
-    // Done When section (after decision log, before plan review)
-    let doneWhenSection = '';
-    if (task.done_when) {
-      doneWhenSection = renderLifecycleSection(
-        'Done When', '🎯', 'phase-done-when',
-        task.done_when, false
-      );
-    }
-
-    // Plan Review section
-    const planReviewComments = parseJsonArray(task.plan_review_comments);
-    const planReviewContent = renderReviewEntries(planReviewComments);
-    let planReviewSection = '';
-    if (planReviewContent || currentPhase === 2) {
-      planReviewSection = `
-        <div class="lifecycle-phase phase-plan-review ${currentPhase === 2 ? 'active' : ''}">
-          <div class="phase-header">
-            <span class="phase-icon">\u{1F50D}</span>
-            <span class="phase-label">Plan Review</span>
-            ${task.plan_review_count > 0 ? `<span class="review-count">${task.plan_review_count} review(s)</span>` : ''}
-          </div>
-          <div class="phase-body">${planReviewContent || '<span class="phase-empty">Awaiting plan review</span>'}</div>
+    const blocks: Block[] = parseJsonArray(task.blocks);
+    const blocksHtml = blocks.map((block, idx) => `
+      <div class="lifecycle-phase phase-block ${block.verdict === 'ok' ? 'block-ok' : 'block-nok'}">
+        <div class="phase-header">
+          <span class="phase-icon">${block.verdict === 'ok' ? '\u2705' : '\u274C'}</span>
+          <span class="phase-label">${block.agent}</span>
+          <span class="block-meta">${block.verdict.toUpperCase()} &middot; ${block.timestamp?.slice(0, 16) || ''}</span>
+          <span class="block-index">#${idx + 1}</span>
         </div>
-      `;
-    }
-
-    // Implementation section
-    const implSection = renderLifecycleSection(
-      'Implementation', '\u{1F528}', 'phase-impl',
-      task.implementation_notes, currentPhase === 3 && !task.implementation_notes
-    );
-
-    // Impl Review section
-    const reviewComments = parseJsonArray(task.review_comments);
-    const reviewContent = renderReviewEntries(reviewComments);
-    let reviewSection = '';
-    if (reviewContent || currentPhase === 4) {
-      reviewSection = `
-        <div class="lifecycle-phase phase-review ${currentPhase === 4 ? 'active' : ''}">
-          <div class="phase-header">
-            <span class="phase-icon">\u{1F4DD}</span>
-            <span class="phase-label">Implementation Review</span>
-            ${task.impl_review_count > 0 ? `<span class="review-count">${task.impl_review_count} review(s)</span>` : ''}
-          </div>
-          <div class="phase-body">${reviewContent || '<span class="phase-empty">Awaiting implementation review</span>'}</div>
+        <div class="phase-body">
+          <div class="block-content">${md(block.content || '')}</div>
+          ${block.decision_log ? `<details class="block-decision-log"><summary>Decision Log</summary><div>${md(block.decision_log)}</div></details>` : ''}
         </div>
-      `;
-    }
+      </div>`).join('');
 
-    // Test Results section
-    const testResults = parseJsonArray(task.test_results);
-    const testContent = renderTestEntries(testResults);
-    let testSection = '';
-    if (testContent || currentPhase === 5) {
-      testSection = `
-        <div class="lifecycle-phase phase-test ${currentPhase === 5 ? 'active' : ''}">
-          <div class="phase-header">
-            <span class="phase-icon">\u{1F9EA}</span>
-            <span class="phase-label">Test Results</span>
-          </div>
-          <div class="phase-body">${testContent || '<span class="phase-empty">Awaiting test execution</span>'}</div>
-        </div>
-      `;
-    }
-
-    // Agent Log section (collapsible)
-    const agentLogs = parseJsonArray(task.agent_log);
-    let agentLogSection = '';
-    if (agentLogs.length > 0) {
-      const MODEL_NAMES = ['opus', 'sonnet', 'haiku', 'gemini', 'copilot', 'gpt'];
-      function splitAgentModel(agent: string): { name: string; model: string | null } {
-        if (!agent) return { name: '', model: null };
-        // Check explicit model field first, then parse from agent string
-        const lower = agent.toLowerCase();
-        for (const m of MODEL_NAMES) {
-          const idx = lower.lastIndexOf(m);
-          if (idx > 0) {
-            // Split at the separator before model name (e.g. "plan-agent-opus" → "plan-agent" + "opus")
-            let sep = idx;
-            while (sep > 0 && (agent[sep - 1] === '-' || agent[sep - 1] === '_')) sep--;
-            return { name: agent.slice(0, sep), model: agent.slice(idx) };
-          }
-        }
-        return { name: agent, model: null };
-      }
-      const logEntries = agentLogs.map((entry: any) => {
-        const { name, model } = splitAgentModel(entry.agent || '');
-        const modelFromField = entry.model || model;
-        const modelBadge = modelFromField
-          ? `<span class="badge model-tag model-${modelFromField.toLowerCase()}">${modelFromField}</span>`
-          : '';
-        return `
-          <div class="agent-log-entry">
-            <span class="agent-log-time">${entry.timestamp?.slice(0, 16) || ''}</span>
-            <span class="badge agent-tag">${name || entry.agent || ''}</span>
-            ${modelBadge}
-            <span class="agent-log-msg">${entry.message || ''}</span>
-          </div>
-        `;
-      }).join('');
-      agentLogSection = `
-        <details class="lifecycle-phase phase-agent-log">
-          <summary class="phase-header">
-            <span class="phase-icon">\u{1F916}</span>
-            <span class="phase-label">Agent Log</span>
-            <span class="review-count">${agentLogs.length} entries</span>
-          </summary>
-          <div class="phase-body agent-log-body">${logEntries}</div>
-        </details>
-      `;
-    }
-
-    // Notes section
     const notes = parseJsonArray(task.notes);
     const notesHtml = notes.map((n: any) => `
       <div class="note-entry">
-        <div class="note-header">
-          <span class="note-author">${n.author || 'user'}</span>
-          <span class="note-time">${n.timestamp?.slice(0, 16).replace('T', ' ') || ''}</span>
-          <button class="note-delete" data-note-id="${n.id}" title="Delete">&times;</button>
-        </div>
-        <div class="note-text">${simpleMarkdownToHtml(n.text || '')}</div>
-      </div>
-    `).join('');
-
-    const notesSection = `
-      <div class="notes-section">
-        <div class="notes-header">
-          <span>Notes</span>
-          <span class="notes-count">${notes.length}</span>
-        </div>
-        <div class="notes-list">${notesHtml}</div>
-        <form class="note-form" id="note-form">
-          <textarea id="note-input" rows="2" placeholder="Add a note... (supports markdown)"></textarea>
-          <button type="submit" class="note-submit">Add Note</button>
-        </form>
-      </div>
-    `;
+        <div class="note-header"><span class="note-author">${n.author || 'user'}</span><span class="note-time">${n.timestamp?.slice(0, 16).replace('T', ' ') || ''}</span>
+          <button class="note-delete" data-note-id="${n.id}">&times;</button></div>
+        <div class="note-text">${md(n.text || '')}</div>
+      </div>`).join('');
 
     content.innerHTML = `
       <h1>#${task.id} ${task.title}</h1>
-      <div class="modal-meta">${meta}</div>
-      ${tagsHtml}
-      ${progressHtml}
-      <div class="lifecycle-sections">
-        ${requirementSection}
-        ${planSection}
-        ${decisionLogSection}
-        ${doneWhenSection}
-        ${planReviewSection}
-        ${implSection}
-        ${reviewSection}
-        ${testSection}
-        ${agentLogSection}
+      <div class="modal-meta">${meta}</div>${tagsHtml}${blockedHtml}${progressHtml}
+      <div class="lifecycle-sections">${requirementSection}${blocksHtml}</div>
+      <div class="notes-section ${isBlocked ? 'notes-highlighted' : ''}">
+        <div class="notes-header"><span>${isBlocked ? '\u{1F6A8} Add a comment to unblock' : 'Notes'}</span><span class="notes-count">${notes.length}</span></div>
+        <div class="notes-list">${notesHtml}</div>
+        <form class="note-form" id="note-form">
+          <textarea id="note-input" rows="2" placeholder="${isBlocked ? 'Comment to unblock...' : 'Add a note...'}"></textarea>
+          <button type="submit" class="note-submit">${isBlocked ? 'Unblock & Add Note' : 'Add Note'}</button>
+        </form>
       </div>
-      ${notesSection}
-      <div class="modal-danger-zone">
-        <button class="delete-task-btn" id="delete-task-btn">Delete Card</button>
-      </div>
-    `;
+      <div class="modal-danger-zone"><button class="delete-task-btn" id="delete-task-btn">Delete Card</button></div>`;
 
-    // Render mermaid diagrams in modal
-    renderMermaidDiagrams(content);
+    renderMermaid(content);
 
-    // Level change handler
-    const levelSelect = document.getElementById("level-select") as HTMLSelectElement;
-    levelSelect.addEventListener("change", async () => {
-      const newLevel = parseInt(levelSelect.value);
-      await fetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ level: newLevel }),
-      });
-      showTaskDetail(id, task.project);
-    });
-
-    // Delete task handler
+    // Event handlers
     document.getElementById("delete-task-btn")!.addEventListener("click", async () => {
-      if (!confirm(`Delete card #${task.id} "${task.title}"?`)) return;
-      await fetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, { method: "DELETE" });
-      document.getElementById("modal-overlay")!.classList.add("hidden");
+      if (!confirm(`Delete card #${task.id}?`)) return;
+      await fetch(`/api/task/${id}`, { method: "DELETE" });
+      overlay.classList.add("hidden");
       refreshCurrentView();
     });
 
-    // Requirements edit handlers
-    const reqEditBtn = document.getElementById("req-edit-btn")!;
     const reqView = document.getElementById("req-body-view")!;
     const reqEdit = document.getElementById("req-body-edit")!;
     const reqTextarea = document.getElementById("req-textarea") as HTMLTextAreaElement;
-    const reqSaveBtn = document.getElementById("req-save-btn")!;
-    const reqCancelBtn = document.getElementById("req-cancel-btn")!;
-
-    reqEditBtn.addEventListener("click", () => {
-      reqView.classList.add("hidden");
-      reqEdit.classList.remove("hidden");
-      reqTextarea.focus();
+    document.getElementById("req-edit-btn")!.addEventListener("click", () => { reqView.classList.add("hidden"); reqEdit.classList.remove("hidden"); reqTextarea.focus(); });
+    document.getElementById("req-cancel-btn")!.addEventListener("click", () => { reqTextarea.value = task.description || ''; reqEdit.classList.add("hidden"); reqView.classList.remove("hidden"); });
+    document.getElementById("req-save-btn")!.addEventListener("click", async () => {
+      await fetch(`/api/task/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description: reqTextarea.value }) });
+      showTaskDetail(id);
     });
 
-    reqCancelBtn.addEventListener("click", () => {
-      reqTextarea.value = task.description || '';
-      reqEdit.classList.add("hidden");
-      reqView.classList.remove("hidden");
-    });
-
-    reqSaveBtn.addEventListener("click", async () => {
-      const newDesc = reqTextarea.value;
-      reqSaveBtn.textContent = "Saving...";
-      await fetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: newDesc }),
-      });
-      showTaskDetail(id, task.project);
-    });
-
-    // Image attachment handlers
     const dropZone = document.getElementById("attachment-drop-zone");
     const fileInput = document.getElementById("attachment-input") as HTMLInputElement | null;
-
     if (dropZone && fileInput) {
       dropZone.addEventListener("click", () => fileInput.click());
-      dropZone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        dropZone.classList.add("drop-active");
-      });
-      dropZone.addEventListener("dragleave", () => {
-        dropZone.classList.remove("drop-active");
-      });
-      dropZone.addEventListener("drop", async (e) => {
-        e.preventDefault();
-        dropZone.classList.remove("drop-active");
-        const files = (e as DragEvent).dataTransfer?.files;
-        if (files) await uploadFiles(id, files, task.project);
-      });
-      fileInput.addEventListener("change", async () => {
-        if (fileInput.files) await uploadFiles(id, fileInput.files, task.project);
-      });
+      dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drop-active"); });
+      dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drop-active"));
+      dropZone.addEventListener("drop", async e => { e.preventDefault(); dropZone.classList.remove("drop-active"); const f = (e as DragEvent).dataTransfer?.files; if (f) await uploadFiles(id, f); });
+      fileInput.addEventListener("change", async () => { if (fileInput.files) await uploadFiles(id, fileInput.files); });
     }
-
-    // Attachment remove buttons
-    content.querySelectorAll(".attachment-remove").forEach((btn) => {
-      btn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const el = btn as HTMLElement;
-        const taskId = el.dataset.id;
-        const storedName = el.dataset.name;
-        await fetch(`/api/task/${taskId}/attachment/${encodeURIComponent(storedName!)}?project=${encodeURIComponent(task.project)}`, {
-          method: "DELETE",
-        });
-        showTaskDetail(id, task.project);
-      });
+    content.querySelectorAll(".attachment-remove").forEach(btn => {
+      btn.addEventListener("click", async e => { e.stopPropagation(); const el = btn as HTMLElement; await fetch(`/api/task/${id}/attachment/${encodeURIComponent(el.dataset.name!)}`, { method: "DELETE" }); showTaskDetail(id); });
     });
 
-    // Note form submit
-    const noteForm = document.getElementById("note-form") as HTMLFormElement;
-    const noteInput = document.getElementById("note-input") as HTMLTextAreaElement;
-    noteForm.addEventListener("submit", async (e) => {
+    (document.getElementById("note-form") as HTMLFormElement).addEventListener("submit", async e => {
       e.preventDefault();
-      const text = noteInput.value.trim();
+      const input = document.getElementById("note-input") as HTMLTextAreaElement;
+      const text = input.value.trim();
       if (!text) return;
-      noteInput.disabled = true;
-      await fetch(`/api/task/${id}/note?project=${encodeURIComponent(task.project)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      showTaskDetail(id, task.project);
+      input.disabled = true;
+      await fetch(`/api/task/${id}/note`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+      showTaskDetail(id);
     });
-
-    // Note delete buttons
-    content.querySelectorAll(".note-delete").forEach((btn) => {
-      btn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const noteId = (btn as HTMLElement).dataset.noteId;
-        await fetch(`/api/task/${id}/note/${noteId}?project=${encodeURIComponent(task.project)}`, { method: "DELETE" });
-        showTaskDetail(id, task.project);
-      });
+    content.querySelectorAll(".note-delete").forEach(btn => {
+      btn.addEventListener("click", async e => { e.stopPropagation(); await fetch(`/api/task/${id}/note/${(btn as HTMLElement).dataset.noteId}`, { method: "DELETE" }); showTaskDetail(id); });
     });
   } catch {
     content.innerHTML = '<div style="color:#ef4444">Failed to load</div>';
   }
 }
 
-function renderProjectCard(card: ProjectCard): string {
-  const taskIds = parseJsonArray(card.task_index);
-  const milestones = parseJsonArray(card.milestones);
-
-  const agentBadge = card.current_agent
-    ? `<span class="badge agent-tag">${card.current_agent}</span>`
-    : "";
-
-  const dateBadge = card.completed_at
-    ? `<span class="badge date">${card.completed_at.slice(0, 10)}</span>`
-    : card.created_at
-      ? `<span class="badge created">${timeAgo(card.created_at)}</span>`
-      : "";
-
-  const projectBadge =
-    !currentProject && card.project
-      ? `<span class="badge project">${card.project}</span>`
-      : "";
-
-  const linearLink = card.linear_project_url
-    ? `<a class="linear-link" href="${card.linear_project_url}" target="_blank" onclick="event.stopPropagation()">Linear</a>`
-    : "";
-
-  const tags = parseTags(card.tags)
-    .map((t) => `<span class="tag">${t}</span>`)
-    .join("");
-
-  const desc = card.description
-    ? card.description.split("\n")[0].slice(0, 100)
-    : "";
-
-  const noteCount = parseJsonArray(card.notes).length;
-  const notesBadge = noteCount > 0
-    ? `<span class="badge notes-count" title="${noteCount} note(s)">\u{1F4AC} ${noteCount}</span>`
-    : "";
-
-  // Milestones mini-list
-  const milestonesHtml = milestones.length > 0
-    ? `<div class="milestone-list">${milestones.slice(0, 4).map((m: any) =>
-        `<div class="milestone-item">${m.status === "done" ? "\u2705" : "\u{1F7E0}"} ${m.title || m.linear_id || "Milestone"}</div>`
-      ).join("")}${milestones.length > 4 ? `<div class="milestone-item">+${milestones.length - 4} more</div>` : ""}</div>`
-    : "";
-
-  // Progress bar if has tasks
-  let progressHtml = "";
-  if (card.status === "processing" || card.status === "done") {
-    progressHtml = `<div class="progress-bar"><div class="progress-fill" style="width:0%" data-project-card-id="${card.id}"></div></div>
-      <div class="progress-label" data-project-progress-id="${card.id}"></div>`;
-  }
-
-  return `
-    <div class="card project-card" draggable="true" data-id="${card.id}" data-status="${card.status}" data-project="${card.project}" data-completed-at="${card.completed_at || ''}">
-      <div class="card-header">
-        <span class="card-id">P#${card.id}</span>
-        ${agentBadge}
-        <button class="card-copy-btn" data-copy="P#${card.id} ${card.title}" title="Copy to clipboard">⎘</button>
-      </div>
-      <div class="card-title">${card.title}</div>
-      ${desc ? `<div class="card-desc">${desc}</div>` : ""}
-      ${linearLink}
-      ${milestonesHtml}
-      ${progressHtml}
-      <div class="card-footer">
-        ${projectBadge}
-        ${notesBadge}
-        ${dateBadge}
-      </div>
-      ${tags ? `<div class="card-tags">${tags}</div>` : ""}
-    </div>
-  `;
-}
-
-function renderProjectColumn(key: string, label: string, icon: string, cards: ProjectCard[]): string {
-  const cardsHtml = cards.map(renderProjectCard).join("");
-  return `
-    <div class="column ${key}" data-column="${key}">
-      <div class="column-header">
-        <span>${icon} ${label}</span>
-        <div class="column-header-right">
-          <span class="count">${cards.length}</span>
-        </div>
-      </div>
-      <div class="column-body" data-column="${key}">
-        ${cardsHtml || '<div class="empty">No projects</div>'}
-      </div>
-    </div>
-  `;
-}
-
-async function loadProjectsBoard() {
-  const board = document.getElementById("projects-board")!;
-  const params = currentProject ? `?project=${encodeURIComponent(currentProject)}` : "";
-
-  try {
-    const res = await fetch(`/api/projects-board${params}`);
-    const data: ProjectsBoard = await res.json();
-
-    renderProjectFilter(data.projects);
-
-    board.innerHTML = PROJECT_COLUMNS.map((col) =>
-      renderProjectColumn(
-        col.key,
-        col.label,
-        col.icon,
-        data[col.key as keyof Omit<ProjectsBoard, "projects">]
-      )
-    ).join("");
-
-    const total = data.backlog.length + data.analyse.length + data.processing.length + data.done.length;
-    document.getElementById("count-summary")!.textContent =
-      `${data.done.length}/${total} projects completed`;
-
-    // Load progress for processing/done project cards
-    board.querySelectorAll<HTMLElement>("[data-project-card-id]").forEach(async (el) => {
-      const cardId = el.dataset.projectCardId;
-      const project = el.closest(".card")?.getAttribute("data-project");
-      if (!cardId || !project) return;
-      try {
-        const tasksRes = await fetch(`/api/project-card/${cardId}/tasks?project=${encodeURIComponent(project)}`);
-        const tasks: Task[] = await tasksRes.json();
-        const doneCount = tasks.filter(t => t.status === "done").length;
-        const pct = tasks.length > 0 ? Math.round((doneCount / tasks.length) * 100) : 0;
-        el.style.width = `${pct}%`;
-        const label = board.querySelector<HTMLElement>(`[data-project-progress-id="${cardId}"]`);
-        if (label) label.textContent = `${doneCount}/${tasks.length} tasks`;
-      } catch { /* ok */ }
-    });
-
-    // Card click → show project detail
-    board.querySelectorAll(".project-card").forEach((el) => {
-      el.addEventListener("click", (e) => {
-        const copyBtn = (e.target as HTMLElement).closest(".card-copy-btn") as HTMLElement | null;
-        if (copyBtn) {
-          e.stopPropagation();
-          navigator.clipboard.writeText(copyBtn.dataset.copy!).then(() => {
-            const orig = copyBtn.textContent!;
-            copyBtn.textContent = "\u2713";
-            setTimeout(() => { copyBtn.textContent = orig; }, 1000);
-          });
-          return;
-        }
-        const id = parseInt((el as HTMLElement).dataset.id!);
-        const project = (el as HTMLElement).dataset.project;
-        showProjectDetail(id, project);
-      });
-    });
-
-  } catch (err) {
-    console.error("loadProjectsBoard failed:", err);
-    board.innerHTML = `
-      <div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;color:#ef4444;font-size:0.9rem;padding:48px">
-        Failed to load projects board
-      </div>
-    `;
-  }
-}
-
-async function showProjectDetail(id: number, project: string | null | undefined) {
-  const params = project ? `?project=${encodeURIComponent(project)}` : "";
-  const res = await fetch(`/api/project-card/${id}${params}`);
-  if (!res.ok) return;
-  const card: ProjectCard = await res.json();
-
-  // Fetch child tasks
-  const tasksRes = await fetch(`/api/project-card/${id}/tasks${params}`);
-  const childTasks: Task[] = tasksRes.ok ? await tasksRes.json() : [];
-
-  const milestones = parseJsonArray(card.milestones);
-  const doneCount = childTasks.filter(t => t.status === "done").length;
-  const pct = childTasks.length > 0 ? Math.round((doneCount / childTasks.length) * 100) : 0;
-
-  const descHtml = card.description ? simpleMarkdownToHtml(card.description) : "<em>No description</em>";
-
-  const linearLink = card.linear_project_url
-    ? `<a href="${card.linear_project_url}" target="_blank" style="color:#60a5fa">Open in Linear</a>`
-    : "";
-
-  // Group tasks by milestone
-  const tasksByMilestone = new Map<string, Task[]>();
-  for (const t of childTasks) {
-    const key = t.milestone_id || "ungrouped";
-    if (!tasksByMilestone.has(key)) tasksByMilestone.set(key, []);
-    tasksByMilestone.get(key)!.push(t);
-  }
-
-  let tasksHtml = "";
-  if (milestones.length > 0) {
-    for (const m of milestones) {
-      const mTasks = tasksByMilestone.get(m.linear_id || m.id) || [];
-      const mDone = mTasks.filter(t => t.status === "done").length;
-      tasksHtml += `<h3 style="margin-top:12px">${m.status === "done" ? "\u2705" : "\u{1F7E0}"} ${m.title} (${mDone}/${mTasks.length})</h3>`;
-      tasksHtml += mTasks.map(t =>
-        `<div style="padding:4px 0;display:flex;gap:8px;align-items:center">
-          <span class="badge ${t.status === 'done' ? 'review-approved' : 'status-' + t.status}" style="font-size:0.65rem">${t.status}</span>
-          <span style="cursor:pointer;color:#60a5fa" onclick="document.getElementById('modal-overlay').classList.add('hidden')">#${t.id}</span>
-          <span>${t.title}</span>
-        </div>`
-      ).join("");
-    }
-  } else if (childTasks.length > 0) {
-    tasksHtml = childTasks.map(t =>
-      `<div style="padding:4px 0;display:flex;gap:8px;align-items:center">
-        <span class="badge ${t.status === 'done' ? 'review-approved' : 'status-' + t.status}" style="font-size:0.65rem">${t.status}</span>
-        <span>#${t.id}</span>
-        <span>${t.title}</span>
-      </div>`
-    ).join("");
-  } else {
-    tasksHtml = "<em>No tasks yet</em>";
-  }
-
-  const agentLog = parseJsonArray(card.agent_log);
-  const agentLogHtml = agentLog.length > 0
-    ? `<details style="margin-top:16px"><summary style="cursor:pointer;color:#94a3b8">Agent Log (${agentLog.length})</summary>
-        ${agentLog.map(e => `<div style="padding:4px 0;font-size:0.75rem"><span class="badge agent-tag">${e.agent}</span> <span style="color:#64748b">${e.timestamp}</span> ${e.message || ""}</div>`).join("")}
-       </details>`
-    : "";
-
-  const notes = parseJsonArray(card.notes);
-  const notesHtml = notes.map(n =>
-    `<div style="padding:8px 0;border-bottom:1px solid #1e293b">
-      <div style="font-size:0.7rem;color:#64748b">${n.author} · ${n.timestamp}</div>
-      <div style="margin-top:4px">${simpleMarkdownToHtml(n.text)}</div>
-    </div>`
-  ).join("");
-
-  const content = document.getElementById("modal-content")!;
-  content.innerHTML = `
-    <div class="task-detail">
-      <div class="detail-header">
-        <span class="detail-id">P#${card.id}</span>
-        <span class="badge status-${card.status}">${card.status}</span>
-        ${linearLink}
-      </div>
-      <h1 style="font-size:1.15rem;margin:8px 0">${card.title}</h1>
-      <div style="font-size:0.75rem;color:#64748b;margin-bottom:12px">
-        Created: ${card.created_at}
-        ${card.started_at ? ` · Started: ${card.started_at}` : ""}
-        ${card.completed_at ? ` · Completed: ${card.completed_at}` : ""}
-      </div>
-
-      <div style="margin-bottom:16px">
-        <div style="display:flex;justify-content:space-between;font-size:0.75rem;margin-bottom:4px">
-          <span>Progress</span>
-          <span>${doneCount}/${childTasks.length} tasks (${pct}%)</span>
-        </div>
-        <div class="progress-bar" style="height:6px;background:#1e293b;border-radius:3px;overflow:hidden">
-          <div style="height:100%;width:${pct}%;background:#4ade80;border-radius:3px;transition:width 0.3s"></div>
-        </div>
-      </div>
-
-      <section>
-        <h2 style="font-size:0.9rem;margin-bottom:8px">Description</h2>
-        <div class="md-content">${descHtml}</div>
-      </section>
-
-      <section style="margin-top:16px">
-        <h2 style="font-size:0.9rem;margin-bottom:8px">Tasks</h2>
-        ${tasksHtml}
-      </section>
-
-      ${agentLogHtml}
-
-      <section style="margin-top:16px">
-        <h2 style="font-size:0.9rem;margin-bottom:8px">Notes (${notes.length})</h2>
-        ${notesHtml}
-      </section>
-
-      <div style="margin-top:24px;padding-top:12px;border-top:1px solid #334155">
-        <button id="delete-project-btn" style="background:#dc2626;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.75rem">Delete Project Card</button>
-      </div>
-    </div>
-  `;
-
-  document.getElementById("modal-overlay")!.classList.remove("hidden");
-
-  document.getElementById("delete-project-btn")!.addEventListener("click", async () => {
-    if (!confirm(`Delete project P#${card.id}?`)) return;
-    await fetch(`/api/project-card/${card.id}?project=${encodeURIComponent(card.project)}`, { method: "DELETE" });
-    document.getElementById("modal-overlay")!.classList.add("hidden");
-    loadProjectsBoard();
-  });
-}
+// ── Board ───────────────────────────────────────────────
 
 async function loadBoard() {
   const board = document.getElementById("board")!;
-  const params = currentProject ? `?project=${encodeURIComponent(currentProject)}` : "";
+  const params = currentPipeline ? `?pipeline=${encodeURIComponent(currentPipeline)}` : "";
 
   try {
-    const res = await fetch(`/api/board${params}`);
-    const data: Board = await res.json();
+    const data: BoardResponse = await (await fetch(`/api/board${params}`)).json();
+    cachedColumnOrder = data.column_order;
+    currentPipeline = data.pipeline;
 
-    renderProjectFilter(data.projects);
+    renderPipelineSelector(data.pipelines, data.pipeline);
 
-    board.innerHTML = COLUMNS.map((col) =>
-      renderColumn(
-        col.key,
-        col.label,
-        col.icon,
-        data[col.key as keyof Omit<Board, "projects">]
-      )
+    board.innerHTML = data.column_order.map(col =>
+      renderColumn(col, col === 'todo' ? '\u{1F4CB} Todo' : col === 'done' ? '\u2705 Done' : `\u{1F916} ${col}`, data.columns[col] || [])
     ).join("");
 
-    const total = data.todo.length + data.plan.length + data.plan_review.length +
-      data.impl.length + data.impl_review.length + data.test.length + data.done.length;
-    document.getElementById("count-summary")!.textContent =
-      `${data.done.length}/${total} completed`;
+    const doneCount = (data.columns["done"] || []).length;
+    let total = 0;
+    for (const col of data.column_order) total += (data.columns[col] || []).length;
+    document.getElementById("count-summary")!.textContent = `${doneCount}/${total} completed`;
 
-    board.querySelectorAll(".card").forEach((el) => {
-      el.addEventListener("click", (e) => {
+    board.querySelectorAll(".card").forEach(el => {
+      el.addEventListener("click", e => {
         const copyBtn = (e.target as HTMLElement).closest(".card-copy-btn") as HTMLElement | null;
-        if (copyBtn) {
-          e.stopPropagation();
-          navigator.clipboard.writeText(copyBtn.dataset.copy!).then(() => {
-            const orig = copyBtn.textContent!;
-            copyBtn.textContent = "✓";
-            setTimeout(() => { copyBtn.textContent = orig; }, 1000);
-          });
-          return;
-        }
-        const id = parseInt((el as HTMLElement).dataset.id!);
-        const project = (el as HTMLElement).dataset.project;
-        showTaskDetail(id, project);
+        if (copyBtn) { e.stopPropagation(); navigator.clipboard.writeText(copyBtn.dataset.copy!); return; }
+        showTaskDetail(parseInt((el as HTMLElement).dataset.id!));
       });
     });
 
     setupDragAndDrop();
     applySearchFilter();
 
-    const addBtn = document.getElementById("add-card-btn");
-    if (addBtn) {
-      addBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        document.getElementById("add-card-overlay")!.classList.remove("hidden");
-        (document.getElementById("add-title") as HTMLInputElement).focus();
-      });
-    }
+    document.getElementById("add-card-btn")?.addEventListener("click", e => {
+      e.stopPropagation();
+      document.getElementById("add-card-overlay")!.classList.remove("hidden");
+      (document.getElementById("add-title") as HTMLInputElement).focus();
+    });
   } catch (err) {
     console.error("loadBoard failed:", err);
-    board.innerHTML = `
-      <div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;color:#ef4444;font-size:0.9rem;padding:48px">
-        Cannot find .claude/kanban.db
-      </div>
-    `;
+    board.innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;color:#ef4444;padding:48px">Cannot load board. Run /kanban-init first.</div>`;
   }
 }
 
+// ── List View ───────────────────────────────────────────
+
 async function loadListView() {
   const listView = document.getElementById("list-view")!;
-  const params = currentProject ? `?project=${encodeURIComponent(currentProject)}` : "";
+  const params = currentPipeline ? `?pipeline=${encodeURIComponent(currentPipeline)}` : "";
 
   try {
-    const res = await fetch(`/api/board${params}`);
-    const data: Board = await res.json();
+    const data: BoardResponse = await (await fetch(`/api/board${params}`)).json();
+    renderPipelineSelector(data.pipelines, data.pipeline);
 
-    renderProjectFilter(data.projects);
-
-    // Flatten all tasks from all columns
     const allTasks: Task[] = [];
-    for (const col of COLUMNS) {
-      for (const t of data[col.key as keyof Omit<Board, "projects">]) {
-        allTasks.push(t);
-      }
-    }
+    for (const col of data.column_order) for (const t of (data.columns[col] || [])) allTasks.push(t);
 
-    // Sort by selected mode (default: ID descending / newest first)
-    const displayTasks = currentSort === 'default'
-      ? [...allTasks].sort((a, b) => b.id - a.id)
-      : sortTasks(allTasks);
-
-    const total = displayTasks.length;
+    const displayTasks = currentSort === 'default' ? [...allTasks].sort((a, b) => b.id - a.id) : sortTasks(allTasks);
     const doneCount = displayTasks.filter(t => t.status === "done").length;
-    document.getElementById("count-summary")!.textContent =
-      `${doneCount}/${total} completed`;
+    document.getElementById("count-summary")!.textContent = `${doneCount}/${displayTasks.length} completed`;
 
+    const statusOpts = data.column_order.map(col => `<option value="${col}">${col}</option>`).join("");
     const rows = displayTasks.map(t => {
-      const pClass = priorityClass(t.priority);
-      const tags = parseTags(t.tags);
-      const tagsHtml = tags.map(tag => `<span class="tag">${tag}</span>`).join("");
+      const isBlocked = t.loop_count >= currentMaxLoops;
       return `
-        <tr class="status-${t.status}" data-id="${t.id}" data-project="${t.project}" data-completed-at="${t.completed_at || ''}">
+        <tr class="status-${t.status} ${isBlocked ? 'row-blocked' : ''}" data-id="${t.id}" data-completed-at="${t.completed_at || ''}">
           <td class="col-id">#${t.id}</td>
           <td class="col-title">${t.title}</td>
-          <td>
-            <select class="list-status-select" data-id="${t.id}" data-field="status">
-              ${COLUMNS.map(c =>
-                `<option value="${c.key}" ${c.key === t.status ? "selected" : ""}>${c.icon} ${c.label}</option>`
-              ).join("")}
-            </select>
-          </td>
-          <td>
-            <select class="list-level-select" data-id="${t.id}" data-field="level">
-              ${[1, 2, 3].map(l =>
-                `<option value="${l}" ${l === t.level ? "selected" : ""}>L${l}</option>`
-              ).join("")}
-            </select>
-          </td>
-          <td>
-            <select class="list-priority-select ${pClass}" data-id="${t.id}" data-field="priority">
-              ${["high", "medium", "low"].map(p =>
-                `<option value="${p}" ${p === t.priority ? "selected" : ""}>${p[0].toUpperCase() + p.slice(1)}</option>`
-              ).join("")}
-            </select>
-          </td>
-          <td class="list-date">${t.project || ""}</td>
-          <td>${tagsHtml}</td>
+          <td><select class="list-status-select" data-id="${t.id}" data-field="status">${statusOpts.replace(`value="${t.status}"`, `value="${t.status}" selected`)}</select></td>
+          <td><select class="list-priority-select ${priorityClass(t.priority)}" data-id="${t.id}" data-field="priority">
+            ${["high", "medium", "low"].map(p => `<option value="${p}" ${p === t.priority ? "selected" : ""}>${p[0].toUpperCase() + p.slice(1)}</option>`).join("")}
+          </select></td>
+          <td>${parseTags(t.tags).map(tag => `<span class="tag">${tag}</span>`).join("")}</td>
           <td class="list-date">${t.created_at?.slice(0, 10) || ""}</td>
           <td class="list-date">${t.completed_at?.slice(0, 10) || ""}</td>
-        </tr>
-      `;
+        </tr>`;
     }).join("");
 
-    listView.innerHTML = `
-      <table class="list-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Title</th>
-            <th>Status</th>
-            <th>Level</th>
-            <th>Priority</th>
-            <th>Project</th>
-            <th>Tags</th>
-            <th>Created</th>
-            <th>Completed</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    `;
+    listView.innerHTML = `<table class="list-table"><thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Priority</th><th>Tags</th><th>Created</th><th>Completed</th></tr></thead><tbody>${rows}</tbody></table>`;
 
-    // Inline edit handlers for selects
-    listView.querySelectorAll("select").forEach((sel) => {
-      sel.addEventListener("change", async (e) => {
+    listView.querySelectorAll("select").forEach(sel => {
+      sel.addEventListener("change", async e => {
         e.stopPropagation();
         const el = sel as HTMLSelectElement;
-        const taskId = el.dataset.id;
-        const field = el.dataset.field!;
-        let value: string | number = el.value;
-        if (field === "level") value = parseInt(value);
-
-        const row = el.closest("tr") as HTMLElement | null;
-        const project = row?.dataset.project || "";
-        const resp = await fetch(`/api/task/${taskId}?project=${encodeURIComponent(project)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ [field]: value }),
+        const resp = await fetch(`/api/task/${el.dataset.id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [el.dataset.field!]: el.value }),
         });
-
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          if (err.error) showToast(err.error);
-          loadListView(); // Revert on error
-          return;
-        }
+        if (!resp.ok) { const err = await resp.json().catch(() => ({})); if (err.error) showToast(err.error); }
         loadListView();
       });
     });
 
-    // Click title to open detail modal
-    listView.querySelectorAll(".col-title").forEach((el) => {
-      el.addEventListener("click", (e) => {
+    listView.querySelectorAll(".col-title").forEach(el => {
+      el.addEventListener("click", e => {
         e.stopPropagation();
-        const row = (el as HTMLElement).closest("tr")! as HTMLElement;
-        const id = parseInt(row.dataset.id!);
-        const project = row.dataset.project;
-        showTaskDetail(id, project);
+        showTaskDetail(parseInt(((el as HTMLElement).closest("tr")! as HTMLElement).dataset.id!));
       });
     });
 
     applySearchFilter();
   } catch (err) {
     console.error("loadListView failed:", err);
-    listView.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:center;color:#ef4444;font-size:0.9rem;padding:48px">
-        Failed to load task list
-      </div>
-    `;
+    listView.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;color:#ef4444;padding:48px">Failed to load</div>`;
   }
 }
 
-function renderProjectFilter(projects: string[]) {
-  const container = document.getElementById("project-filter")!;
-  if (projects.length <= 1) {
-    container.innerHTML = projects[0]
-      ? `<span class="project-label">${projects[0]}</span>`
-      : "";
+// ── Pipeline selector ───────────────────────────────────
+
+function renderPipelineSelector(pipelines: string[], active: string) {
+  const container = document.getElementById("pipeline-filter")!;
+  if (pipelines.length <= 1) {
+    container.innerHTML = `<span class="pipeline-label">${active}</span>`;
     return;
   }
+  container.innerHTML = `<select id="pipeline-select">${pipelines.map(p =>
+    `<option value="${p}" ${p === active ? "selected" : ""}>${p}</option>`
+  ).join("")}</select>`;
 
-  const options = projects
-    .map(
-      (p) =>
-        `<option value="${p}" ${p === currentProject ? "selected" : ""}>${p}</option>`
-    )
-    .join("");
-
-  container.innerHTML = `
-    <select id="project-select">
-      <option value="">All Projects</option>
-      ${options}
-    </select>
-  `;
-
-  document.getElementById("project-select")!.addEventListener("change", (e) => {
-    currentProject = (e.target as HTMLSelectElement).value || null;
-    if (currentProject) {
-      localStorage.setItem('kanban-project', currentProject);
-    } else {
-      localStorage.removeItem('kanban-project');
-    }
+  document.getElementById("pipeline-select")!.addEventListener("change", e => {
+    currentPipeline = (e.target as HTMLSelectElement).value;
+    localStorage.setItem('kanban-pipeline', currentPipeline);
     refreshCurrentView();
   });
 }
 
+// ── Drag & Drop ─────────────────────────────────────────
+
 function getInsertBeforeCard(column: HTMLElement, y: number): HTMLElement | null {
-  const cards = [...column.querySelectorAll(".card:not(.dragging)")];
-  for (const card of cards) {
-    const rect = (card as HTMLElement).getBoundingClientRect();
-    const midY = rect.top + rect.height / 2;
-    if (y < midY) return card as HTMLElement;
+  for (const card of column.querySelectorAll(".card:not(.dragging)")) {
+    if (y < (card as HTMLElement).getBoundingClientRect().top + (card as HTMLElement).getBoundingClientRect().height / 2)
+      return card as HTMLElement;
   }
   return null;
 }
 
-function clearDropIndicators() {
-  document.querySelectorAll(".drop-indicator").forEach((el) => el.remove());
-}
-
-function showDropIndicator(column: HTMLElement, beforeCard: HTMLElement | null) {
-  clearDropIndicators();
-  const indicator = document.createElement("div");
-  indicator.className = "drop-indicator";
-  if (beforeCard) {
-    column.insertBefore(indicator, beforeCard);
-  } else {
-    column.appendChild(indicator);
-  }
-}
+function clearDropIndicators() { document.querySelectorAll(".drop-indicator").forEach(el => el.remove()); }
 
 function setupDragAndDrop() {
-  const cards = document.querySelectorAll(".card");
-  const columns = document.querySelectorAll(".column-body");
-
-  cards.forEach((card) => {
-    card.addEventListener("dragstart", (e) => {
-      const ev = e as DragEvent;
-      const cardEl = card as HTMLElement;
-      ev.dataTransfer!.setData("text/plain", `${cardEl.dataset.project}:${cardEl.dataset.id}`);
-      cardEl.classList.add("dragging");
+  document.querySelectorAll(".card").forEach(card => {
+    card.addEventListener("dragstart", e => {
+      (e as DragEvent).dataTransfer!.setData("text/plain", (card as HTMLElement).dataset.id!);
+      (card as HTMLElement).classList.add("dragging");
       isDragging = true;
     });
-    card.addEventListener("dragend", () => {
-      (card as HTMLElement).classList.remove("dragging");
-      clearDropIndicators();
-      isDragging = false;
-    });
+    card.addEventListener("dragend", () => { (card as HTMLElement).classList.remove("dragging"); clearDropIndicators(); isDragging = false; });
   });
 
-  columns.forEach((col) => {
-    col.addEventListener("dragover", (e) => {
+  document.querySelectorAll(".column-body").forEach(col => {
+    col.addEventListener("dragover", e => {
       e.preventDefault();
-      const colEl = col as HTMLElement;
-      colEl.classList.add("drag-over");
-      const beforeCard = getInsertBeforeCard(colEl, (e as DragEvent).clientY);
-      showDropIndicator(colEl, beforeCard);
-    });
-    col.addEventListener("dragleave", (e) => {
-      const colEl = col as HTMLElement;
-      // Only remove if actually leaving the column (not entering a child)
-      if (!colEl.contains((e as DragEvent).relatedTarget as Node)) {
-        colEl.classList.remove("drag-over");
-        clearDropIndicators();
-      }
-    });
-    col.addEventListener("drop", async (e) => {
-      e.preventDefault();
-      const colEl = col as HTMLElement;
-      colEl.classList.remove("drag-over");
+      (col as HTMLElement).classList.add("drag-over");
+      const before = getInsertBeforeCard(col as HTMLElement, (e as DragEvent).clientY);
       clearDropIndicators();
-
-      const ev = e as DragEvent;
-      const dragData = ev.dataTransfer!.getData("text/plain");
-      const colonIdx = dragData.lastIndexOf(":");
-      const dragProject = colonIdx >= 0 ? dragData.slice(0, colonIdx) : "";
-      const id = parseInt(colonIdx >= 0 ? dragData.slice(colonIdx + 1) : dragData);
-      const newStatus = colEl.dataset.column!;
-      const beforeCard = getInsertBeforeCard(colEl, ev.clientY);
-
-      // Find afterId and beforeId
-      const cardsInCol = [...colEl.querySelectorAll(".card:not(.dragging)")];
-      let afterId: number | null = null;
-      let beforeId: number | null = null;
-
-      if (beforeCard) {
-        beforeId = parseInt(beforeCard.dataset.id!);
-        const idx = cardsInCol.indexOf(beforeCard);
-        if (idx > 0) {
-          afterId = parseInt((cardsInCol[idx - 1] as HTMLElement).dataset.id!);
-        }
-      } else if (cardsInCol.length > 0) {
-        afterId = parseInt((cardsInCol[cardsInCol.length - 1] as HTMLElement).dataset.id!);
+      const ind = document.createElement("div"); ind.className = "drop-indicator";
+      if (before) col.insertBefore(ind, before); else col.appendChild(ind);
+    });
+    col.addEventListener("dragleave", e => {
+      if (!(col as HTMLElement).contains((e as DragEvent).relatedTarget as Node)) {
+        (col as HTMLElement).classList.remove("drag-over"); clearDropIndicators();
       }
-
-      const resp = await fetch(`/api/task/${id}/reorder?project=${encodeURIComponent(dragProject)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+    });
+    col.addEventListener("drop", async e => {
+      e.preventDefault();
+      (col as HTMLElement).classList.remove("drag-over");
+      clearDropIndicators();
+      const id = parseInt((e as DragEvent).dataTransfer!.getData("text/plain"));
+      const newStatus = (col as HTMLElement).dataset.column!;
+      const before = getInsertBeforeCard(col as HTMLElement, (e as DragEvent).clientY);
+      const cards = [...(col as HTMLElement).querySelectorAll(".card:not(.dragging)")];
+      let afterId: number | null = null, beforeId: number | null = null;
+      if (before) {
+        beforeId = parseInt(before.dataset.id!);
+        const idx = cards.indexOf(before);
+        if (idx > 0) afterId = parseInt((cards[idx - 1] as HTMLElement).dataset.id!);
+      } else if (cards.length > 0) {
+        afterId = parseInt((cards[cards.length - 1] as HTMLElement).dataset.id!);
+      }
+      const resp = await fetch(`/api/task/${id}/reorder`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus, afterId, beforeId }),
       });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        if (err.error) {
-          // Show brief toast for invalid transitions
-          showToast(err.error);
-        }
-      }
+      if (!resp.ok) { const err = await resp.json().catch(() => ({})); if (err.error) showToast(err.error); }
       loadBoard();
     });
   });
 }
 
-function showToast(message: string) {
-  const existing = document.querySelector('.toast');
-  if (existing) existing.remove();
+// ── Pipeline Settings ───────────────────────────────────
 
+interface AgentInfo {
+  name: string;
+  source: string;
+  description?: string;
+  model?: string;
+  color?: string;
+  tools?: string[];
+  prompt?: string;
+}
+
+async function showPipelineSettings() {
+  const overlay = document.getElementById("pipeline-overlay")!;
+  const content = document.getElementById("pipeline-content")!;
+  overlay.classList.remove("hidden");
+
+  const allPipelines: PipelinesFile = await (await fetch("/api/pipelines")).json();
+  const agents: AgentInfo[] = await (await fetch("/api/agents")).json();
+  const agentMap = new Map<string, AgentInfo>();
+  for (const a of agents) agentMap.set(a.name, a);
+
+  let editingName: string = currentPipeline || allPipelines.default;
+  let selectedAgent: string | null = null;
+
+  function agentBadge(name: string): string {
+    const a = agentMap.get(name);
+    const model = a?.model ? `<span class="agent-detail-model">${a.model}</span>` : '';
+    const source = a?.source ? `<span class="agent-detail-source">${a.source}</span>` : '';
+    return `${name} ${model} ${source}`;
+  }
+
+  function escapeHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function renderAgentDetail(name: string): string {
+    const a = agentMap.get(name);
+    if (!a) return `<div class="agent-detail-empty">Agent "${name}" not found</div>`;
+
+    const badges = [
+      a.model ? `<span class="agent-badge agent-badge--model">${a.model}</span>` : '',
+      `<span class="agent-badge agent-badge--source">${a.source}</span>`,
+    ].filter(Boolean).join('');
+
+    const toolsHtml = a.tools && a.tools.length > 0 ? `
+      <div class="agent-detail-section">
+        <span class="agent-detail-section-title">Tools</span>
+        <div class="agent-detail-tool-list">${a.tools.map(t => `<span class="agent-detail-tool">${t}</span>`).join('')}</div>
+      </div>` : '';
+
+    const promptHtml = a.prompt ? `
+      <div class="agent-detail-section">
+        <span class="agent-detail-section-title">Prompt</span>
+        <pre class="agent-detail-prompt">${escapeHtml(a.prompt)}</pre>
+      </div>` : '';
+
+    return `
+      <div class="agent-detail">
+        <div class="agent-detail-header">
+          <div class="agent-detail-title-group">
+            <span class="agent-detail-name">${a.name}</span>
+            <div class="agent-detail-badges">${badges}</div>
+          </div>
+        </div>
+        ${a.description ? `<p class="agent-detail-desc">${a.description}</p>` : ''}
+        ${toolsHtml}
+        ${promptHtml}
+      </div>`;
+  }
+
+  function render() {
+    const pipelineNames = Object.keys(allPipelines.pipelines);
+    const pipeline = allPipelines.pipelines[editingName] || { stages: [] };
+
+    const tabsHtml = pipelineNames.map(n =>
+      `<button class="pipeline-tab ${n === editingName ? 'active' : ''}" data-name="${n}">${n}</button>`
+    ).join('') + `<button class="pipeline-tab pipeline-add-tab" id="add-pipeline-btn">+</button>`;
+
+    const stagesHtml = pipeline.stages.map((s, i) => `
+      <div class="pipeline-stage ${s === selectedAgent ? 'selected' : ''}" draggable="true" data-index="${i}" data-agent="${s}">
+        <span class="pipeline-drag-handle">\u2630</span>
+        <span class="pipeline-stage-name">${s}</span>
+        ${agentMap.get(s)?.model ? `<span class="pipeline-stage-model">${agentMap.get(s)!.model}</span>` : ''}
+        <button class="pipeline-remove-btn" data-index="${i}">\u{1F5D1}\uFE0F</button>
+      </div>`).join('');
+
+    const unused = agents.filter(a => !pipeline.stages.includes(a.name));
+    const addOpts = unused.map(a => `<option value="${a.name}">${a.name} (${a.source})</option>`).join('');
+
+    const detailHtml = selectedAgent ? renderAgentDetail(selectedAgent) : '';
+
+    content.innerHTML = `
+      <div class="pipeline-settings">
+        <div class="pipeline-tabs">${tabsHtml}</div>
+        <div class="pipeline-settings-body">
+          <div class="pipeline-settings-left">
+            <div class="pipeline-config-row">
+              <label class="pipeline-config-label">Max loops</label>
+              <input type="number" id="pipeline-max-loops" class="pipeline-config-input" value="${allPipelines.max_loops}" min="1" max="10" />
+            </div>
+            <div class="pipeline-section">
+              <label class="pipeline-section-title">Stages</label>
+              <div id="pipeline-stages-list" class="pipeline-stages-list">${stagesHtml}</div>
+            </div>
+            ${unused.length > 0 ? `<div class="pipeline-add-row">
+              <select id="pipeline-add-select" class="pipeline-add-select"><option value="">Add agent…</option>${addOpts}</select>
+              <button type="button" id="pipeline-add-btn" class="pipeline-add-btn">Add</button></div>` : ''}
+            <div class="pipeline-footer-row">
+              <label class="pipeline-default-label"><input type="radio" name="default-pipeline" ${editingName === allPipelines.default ? 'checked' : ''} id="set-default-radio" /> Default pipeline</label>
+              <button type="button" id="delete-pipeline-btn" class="pipeline-delete-btn" ${pipelineNames.length <= 1 ? 'disabled' : ''}>Delete "${editingName}"</button>
+            </div>
+          </div>
+          <div class="pipeline-settings-right">${detailHtml || '<div class="agent-detail-empty">Select a stage to view details</div>'}</div>
+        </div>
+        <div class="pipeline-actions">
+          <button type="button" id="pipeline-cancel-btn" class="pipeline-btn-secondary">Cancel</button>
+          <button type="button" id="pipeline-save-btn" class="pipeline-btn-primary">Save</button>
+        </div>
+      </div>`;
+
+    // Tab clicks
+    content.querySelectorAll('.pipeline-tab:not(.pipeline-add-tab)').forEach(btn => {
+      btn.addEventListener('click', () => { editingName = (btn as HTMLElement).dataset.name!; selectedAgent = null; render(); });
+    });
+
+    // Stage clicks → show agent detail
+    content.querySelectorAll('.pipeline-stage').forEach(el => {
+      el.addEventListener('click', e => {
+        if ((e.target as HTMLElement).closest('.pipeline-remove-btn') || (e.target as HTMLElement).closest('.pipeline-drag-handle')) return;
+        selectedAgent = (el as HTMLElement).dataset.agent || null;
+        render();
+      });
+    });
+
+    // Add pipeline
+    document.getElementById('add-pipeline-btn')?.addEventListener('click', () => {
+      const name = prompt('Pipeline name:');
+      if (name && !allPipelines.pipelines[name]) {
+        allPipelines.pipelines[name] = { stages: [] };
+        editingName = name;
+        selectedAgent = null;
+        render();
+      }
+    });
+
+    // Remove stage
+    content.querySelectorAll('.pipeline-remove-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const idx = parseInt((btn as HTMLElement).dataset.index!);
+        if (pipeline.stages[idx] === selectedAgent) selectedAgent = null;
+        pipeline.stages.splice(idx, 1);
+        render();
+      });
+    });
+
+    // Add stage
+    document.getElementById('pipeline-add-btn')?.addEventListener('click', () => {
+      const sel = document.getElementById('pipeline-add-select') as HTMLSelectElement;
+      if (sel.value) { pipeline.stages.push(sel.value); selectedAgent = sel.value; render(); }
+    });
+
+    // Delete pipeline
+    document.getElementById('delete-pipeline-btn')?.addEventListener('click', () => {
+      if (Object.keys(allPipelines.pipelines).length <= 1) return;
+      delete allPipelines.pipelines[editingName];
+      if (allPipelines.default === editingName) allPipelines.default = Object.keys(allPipelines.pipelines)[0];
+      editingName = allPipelines.default;
+      selectedAgent = null;
+      render();
+    });
+
+    // Save
+    document.getElementById('pipeline-save-btn')!.addEventListener('click', async () => {
+      allPipelines.max_loops = parseInt((document.getElementById('pipeline-max-loops') as HTMLInputElement).value) || 3;
+      if ((document.getElementById('set-default-radio') as HTMLInputElement).checked) allPipelines.default = editingName;
+      await fetch('/api/pipelines', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(allPipelines) });
+      overlay.classList.add('hidden');
+      currentPipeline = editingName;
+      localStorage.setItem('kanban-pipeline', currentPipeline);
+      refreshCurrentView();
+    });
+
+    document.getElementById('pipeline-cancel-btn')!.addEventListener('click', () => overlay.classList.add('hidden'));
+
+    // Stage drag-and-drop
+    const list = document.getElementById('pipeline-stages-list')!;
+    let dragIdx: number | null = null;
+    list.querySelectorAll('.pipeline-stage').forEach(el => {
+      el.addEventListener('dragstart', e => { dragIdx = parseInt((el as HTMLElement).dataset.index!); (el as HTMLElement).classList.add('dragging'); (e as DragEvent).dataTransfer!.effectAllowed = 'move'; });
+      el.addEventListener('dragend', () => { (el as HTMLElement).classList.remove('dragging'); dragIdx = null; });
+      el.addEventListener('dragover', e => { e.preventDefault(); (el as HTMLElement).classList.add('drag-over'); });
+      el.addEventListener('dragleave', () => (el as HTMLElement).classList.remove('drag-over'));
+      el.addEventListener('drop', e => {
+        e.preventDefault(); (el as HTMLElement).classList.remove('drag-over');
+        const dropIdx = parseInt((el as HTMLElement).dataset.index!);
+        if (dragIdx !== null && dragIdx !== dropIdx) { const [moved] = pipeline.stages.splice(dragIdx, 1); pipeline.stages.splice(dropIdx, 0, moved); render(); }
+      });
+    });
+  }
+
+  render();
+}
+
+// ── Toast ───────────────────────────────────────────────
+
+function showToast(message: string) {
+  document.querySelector('.toast')?.remove();
   const toast = document.createElement('div');
   toast.className = 'toast';
   toast.textContent = message;
@@ -1575,241 +803,117 @@ function showToast(message: string) {
   setTimeout(() => toast.remove(), 3000);
 }
 
-// Set tab title to project name
-fetch("/api/info")
-  .then((r) => r.json())
-  .then((info: { projectName: string }) => {
-    if (info.projectName) {
-      document.title = `Kanban \u00b7 ${info.projectName}`;
-      document.querySelector("header h1")!.textContent = `Kanban \u00b7 ${info.projectName}`;
-    }
-  })
-  .catch(() => {});
+// ── View switching ──────────────────────────────────────
 
 function switchView(view: "board" | "list") {
   currentView = view;
-  const boardEl = document.getElementById("board")!;
-  const projectsBoardEl = document.getElementById("projects-board")!;
-  const listEl = document.getElementById("list-view")!;
-  const tabBoard = document.getElementById("tab-board")!;
-  const tabList = document.getElementById("tab-list")!;
-
-  // Hide all views
-  boardEl.classList.add("hidden");
-  projectsBoardEl.classList.add("hidden");
-  listEl.classList.add("hidden");
-  tabBoard.classList.remove("active");
-  tabList.classList.remove("active");
-
-  if (view === "board") {
-    tabBoard.classList.add("active");
-    if (currentBoardType === "projects") {
-      projectsBoardEl.classList.remove("hidden");
-      loadProjectsBoard();
-    } else {
-      boardEl.classList.remove("hidden");
-      loadBoard();
-    }
-  } else {
-    tabList.classList.add("active");
-    listEl.classList.remove("hidden");
-    loadListView();
-  }
+  document.getElementById("board")!.classList.toggle("hidden", view !== "board");
+  document.getElementById("list-view")!.classList.toggle("hidden", view !== "list");
+  document.getElementById("tab-board")!.classList.toggle("active", view === "board");
+  document.getElementById("tab-list")!.classList.toggle("active", view === "list");
+  if (view === "board") loadBoard(); else loadListView();
 }
 
-function switchBoardType(type: "tasks" | "projects") {
-  currentBoardType = type;
-  localStorage.setItem('kanban-board-type', type);
-  const btnTasks = document.getElementById("type-tasks")!;
-  const btnProjects = document.getElementById("type-projects")!;
-  btnTasks.classList.toggle("active", type === "tasks");
-  btnProjects.classList.toggle("active", type === "projects");
+function refreshCurrentView() { if (currentView === "board") loadBoard(); else loadListView(); }
 
-  // Reset to board view when switching type
-  switchView("board");
+// ── Theme ───────────────────────────────────────────────
+
+function getTheme(): "light" | "dark" {
+  const saved = localStorage.getItem('kanban-theme');
+  if (saved === 'light' || saved === 'dark') return saved;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-function refreshCurrentView() {
-  if (currentView === "board") {
-    if (currentBoardType === "projects") loadProjectsBoard();
-    else loadBoard();
-  } else {
-    loadListView();
-  }
+function applyTheme(theme: "light" | "dark") {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('kanban-theme', theme);
+  const btn = document.getElementById('theme-toggle-btn')!;
+  btn.innerHTML = theme === 'dark'
+    ? '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1M8 13.5v1M1.5 8h1M13.5 8h1M3.6 3.6l.7.7M11.7 11.7l.7.7M3.6 12.4l.7-.7M11.7 4.3l.7-.7"/></svg>'
+    : '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13.5 9.2A5.5 5.5 0 0 1 6.8 2.5 5.5 5.5 0 1 0 13.5 9.2z"/></svg>';
+  btn.title = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
 }
 
-// Init
-switchBoardType(currentBoardType);
+applyTheme(getTheme());
 
-// Restore persisted UI state
+document.getElementById('theme-toggle-btn')!.addEventListener('click', () => {
+  applyTheme(getTheme() === 'dark' ? 'light' : 'dark');
+});
+
+// ── Init ────────────────────────────────────────────────
+
+// Load max_loops
+fetch("/api/pipelines").then(r => r.json()).then((d: PipelinesFile) => { currentMaxLoops = d.max_loops; }).catch(() => {});
+
+document.querySelector("header h1")!.textContent = "Kanban Board";
+switchView("board");
+
 (document.getElementById("sort-select") as HTMLSelectElement).value = currentSort;
-if (hideOldDone) {
-  document.getElementById("hide-done-btn")!.classList.add("active");
-}
+if (hideOldDone) document.getElementById("hide-done-btn")!.classList.add("active");
 
-// Tab switching
 document.getElementById("tab-board")!.addEventListener("click", () => switchView("board"));
 document.getElementById("tab-list")!.addEventListener("click", () => switchView("list"));
-document.getElementById("type-tasks")!.addEventListener("click", () => switchBoardType("tasks"));
-document.getElementById("type-projects")!.addEventListener("click", () => switchBoardType("projects"));
+document.getElementById("pipeline-settings-btn")!.addEventListener("click", showPipelineSettings);
+document.getElementById("pipeline-close")!.addEventListener("click", () => document.getElementById("pipeline-overlay")!.classList.add("hidden"));
+document.getElementById("pipeline-overlay")!.addEventListener("click", e => { if (e.target === e.currentTarget) document.getElementById("pipeline-overlay")!.classList.add("hidden"); });
+document.getElementById("refresh-btn")!.addEventListener("click", refreshCurrentView);
+document.getElementById("search-input")!.addEventListener("input", e => { currentSearch = (e.target as HTMLInputElement).value.trim(); applySearchFilter(); });
+document.getElementById("sort-select")!.addEventListener("change", e => { currentSort = (e.target as HTMLSelectElement).value; localStorage.setItem('kanban-sort', currentSort); refreshCurrentView(); });
+document.getElementById("hide-done-btn")!.addEventListener("click", () => { hideOldDone = !hideOldDone; localStorage.setItem('kanban-hide-old', String(hideOldDone)); document.getElementById("hide-done-btn")!.classList.toggle("active", hideOldDone); applySearchFilter(); });
 
-// Auto-refresh every 10 seconds (pause when modal is open or dragging)
+document.getElementById("modal-close")!.addEventListener("click", () => document.getElementById("modal-overlay")!.classList.add("hidden"));
+document.getElementById("modal-overlay")!.addEventListener("click", e => { if (e.target === e.currentTarget) document.getElementById("modal-overlay")!.classList.add("hidden"); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { document.getElementById("modal-overlay")!.classList.add("hidden"); document.getElementById("add-card-overlay")!.classList.add("hidden"); document.getElementById("pipeline-overlay")!.classList.add("hidden"); } });
+
 setInterval(() => {
   if (isDragging) return;
-  const detailOpen = !document.getElementById("modal-overlay")!.classList.contains("hidden");
-  const addOpen = !document.getElementById("add-card-overlay")!.classList.contains("hidden");
-  if (!detailOpen && !addOpen) {
-    refreshCurrentView();
-  }
+  if (!document.getElementById("modal-overlay")!.classList.contains("hidden")) return;
+  if (!document.getElementById("add-card-overlay")!.classList.contains("hidden")) return;
+  if (!document.getElementById("pipeline-overlay")!.classList.contains("hidden")) return;
+  refreshCurrentView();
 }, 10000);
 
-// Refresh button
-document.getElementById("refresh-btn")!.addEventListener("click", refreshCurrentView);
-
-// Search — DOM filter, no API re-fetch
-document.getElementById("search-input")!.addEventListener("input", (e) => {
-  currentSearch = (e.target as HTMLInputElement).value.trim();
-  applySearchFilter();
-});
-
-// Sort — requires re-render
-document.getElementById("sort-select")!.addEventListener("change", (e) => {
-  currentSort = (e.target as HTMLSelectElement).value;
-  localStorage.setItem('kanban-sort', currentSort);
-  refreshCurrentView();
-});
-
-// Hide old done toggle
-document.getElementById("hide-done-btn")!.addEventListener("click", () => {
-  hideOldDone = !hideOldDone;
-  localStorage.setItem('kanban-hide-old', String(hideOldDone));
-  document.getElementById("hide-done-btn")!.classList.toggle("active", hideOldDone);
-  applySearchFilter();
-});
-
-// Close modal
-document.getElementById("modal-close")!.addEventListener("click", () => {
-  document.getElementById("modal-overlay")!.classList.add("hidden");
-});
-document.getElementById("modal-overlay")!.addEventListener("click", (e) => {
-  if (e.target === e.currentTarget) {
-    document.getElementById("modal-overlay")!.classList.add("hidden");
-  }
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    document.getElementById("modal-overlay")!.classList.add("hidden");
-    document.getElementById("add-card-overlay")!.classList.add("hidden");
-  }
-});
-
-// Add card modal
+// Add card
 const addCardOverlay = document.getElementById("add-card-overlay")!;
 let pendingFiles: File[] = [];
 
-function renderAddAttachmentPreview() {
-  const preview = document.getElementById("add-attachment-preview")!;
-  if (pendingFiles.length === 0) {
-    preview.innerHTML = "";
-    return;
-  }
-  preview.innerHTML = pendingFiles.map((f, i) => `
-    <div class="attachment-thumb">
-      <img src="${URL.createObjectURL(f)}" alt="${f.name}" />
-      <button class="attachment-remove" data-idx="${i}" title="Remove" type="button">&times;</button>
-      <span class="attachment-name">${f.name}</span>
-    </div>
-  `).join("");
-  preview.querySelectorAll(".attachment-remove").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const idx = parseInt((btn as HTMLElement).dataset.idx!);
-      pendingFiles.splice(idx, 1);
-      renderAddAttachmentPreview();
-    });
-  });
+function renderAddPreview() {
+  const p = document.getElementById("add-attachment-preview")!;
+  if (!pendingFiles.length) { p.innerHTML = ""; return; }
+  p.innerHTML = pendingFiles.map((f, i) => `<div class="attachment-thumb"><img src="${URL.createObjectURL(f)}" /><button class="attachment-remove" data-idx="${i}" type="button">&times;</button></div>`).join("");
+  p.querySelectorAll(".attachment-remove").forEach(btn => btn.addEventListener("click", e => { e.stopPropagation(); pendingFiles.splice(parseInt((btn as HTMLElement).dataset.idx!), 1); renderAddPreview(); }));
 }
 
-function addPendingFiles(files: FileList | File[]) {
-  for (const f of Array.from(files)) {
-    if (f.type.startsWith("image/")) pendingFiles.push(f);
-  }
-  renderAddAttachmentPreview();
-}
+document.getElementById("add-card-close")!.addEventListener("click", () => { addCardOverlay.classList.add("hidden"); pendingFiles = []; renderAddPreview(); });
+addCardOverlay.addEventListener("click", e => { if (e.target === e.currentTarget) { addCardOverlay.classList.add("hidden"); pendingFiles = []; renderAddPreview(); } });
 
-document.getElementById("add-card-close")!.addEventListener("click", () => {
-  addCardOverlay.classList.add("hidden");
-  pendingFiles = [];
-  renderAddAttachmentPreview();
-});
-addCardOverlay.addEventListener("click", (e) => {
-  if (e.target === e.currentTarget) {
-    addCardOverlay.classList.add("hidden");
-    pendingFiles = [];
-    renderAddAttachmentPreview();
-  }
-});
+const addZone = document.getElementById("add-attachment-zone")!;
+const addInput = document.getElementById("add-attachment-input") as HTMLInputElement;
+addZone.addEventListener("click", () => addInput.click());
+addZone.addEventListener("dragover", e => { e.preventDefault(); addZone.classList.add("drop-active"); });
+addZone.addEventListener("dragleave", () => addZone.classList.remove("drop-active"));
+addZone.addEventListener("drop", e => { e.preventDefault(); addZone.classList.remove("drop-active"); const f = (e as DragEvent).dataTransfer?.files; if (f) for (const file of Array.from(f)) if (file.type.startsWith("image/")) pendingFiles.push(file); renderAddPreview(); });
+addInput.addEventListener("change", () => { if (addInput.files) for (const f of Array.from(addInput.files)) if (f.type.startsWith("image/")) pendingFiles.push(f); addInput.value = ""; renderAddPreview(); });
 
-// Add card attachment drop zone
-const addAttachZone = document.getElementById("add-attachment-zone")!;
-const addAttachInput = document.getElementById("add-attachment-input") as HTMLInputElement;
-addAttachZone.addEventListener("click", () => addAttachInput.click());
-addAttachZone.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  addAttachZone.classList.add("drop-active");
-});
-addAttachZone.addEventListener("dragleave", () => {
-  addAttachZone.classList.remove("drop-active");
-});
-addAttachZone.addEventListener("drop", (e) => {
-  e.preventDefault();
-  addAttachZone.classList.remove("drop-active");
-  const files = (e as DragEvent).dataTransfer?.files;
-  if (files) addPendingFiles(files);
-});
-addAttachInput.addEventListener("change", () => {
-  if (addAttachInput.files) addPendingFiles(addAttachInput.files);
-  addAttachInput.value = "";
-});
-
-document.getElementById("add-card-form")!.addEventListener("submit", async (e) => {
+document.getElementById("add-card-form")!.addEventListener("submit", async e => {
   e.preventDefault();
   const title = (document.getElementById("add-title") as HTMLInputElement).value.trim();
   if (!title) return;
-
   const priority = (document.getElementById("add-priority") as HTMLSelectElement).value;
-  const level = parseInt((document.getElementById("add-level") as HTMLSelectElement).value) || 3;
   const description = (document.getElementById("add-description") as HTMLTextAreaElement).value.trim() || null;
   const tagsRaw = (document.getElementById("add-tags") as HTMLInputElement).value.trim();
-  const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : null;
+  const tags = tagsRaw ? tagsRaw.split(",").map(t => t.trim()).filter(Boolean) : null;
+  const pipeline = currentPipeline || undefined;
 
-  const project = currentProject;
-  if (!project) {
-    showToast("Select a project first");
-    return;
-  }
-
-  const submitBtn = document.querySelector("#add-card-form .form-submit") as HTMLButtonElement;
-  submitBtn.textContent = pendingFiles.length > 0 ? "Creating..." : "Add Card";
-  submitBtn.disabled = true;
-
-  const res = await fetch("/api/task", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, priority, level, description, tags, project }),
-  });
+  const btn = document.querySelector("#add-card-form .form-submit") as HTMLButtonElement;
+  btn.disabled = true;
+  const res = await fetch("/api/task", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, priority, description, tags, pipeline }) });
   const result = await res.json();
-
-  // Upload pending attachments
-  if (pendingFiles.length > 0 && result.id) {
-    await uploadFiles(result.id, pendingFiles as any, project);
-  }
-
+  if (pendingFiles.length > 0 && result.id) await uploadFiles(result.id, pendingFiles as any);
   pendingFiles = [];
-  submitBtn.textContent = "Add Card";
-  submitBtn.disabled = false;
+  btn.disabled = false;
   (document.getElementById("add-card-form") as HTMLFormElement).reset();
-  renderAddAttachmentPreview();
+  renderAddPreview();
   addCardOverlay.classList.add("hidden");
   refreshCurrentView();
 });
