@@ -2,7 +2,6 @@
 description: Check if the Slack bot is running
 ---
 
-1. Find PID: `pgrep -f "slack_bot.py"`
-2. If found, report running with PID.
-3. If not found, report stopped.
-4. Show last 5 lines of log if it exists: `tail -5 "${CLAUDE_PLUGIN_DATA}/slack-bot.log"`
+1. Check container status: `docker ps -a --filter name=evaneos-slack-bot --format '{{.Status}}'`
+2. If running, show last 10 lines of logs: `docker logs evaneos-slack-bot 2>&1 | tail -10`
+3. If not running, report stopped.

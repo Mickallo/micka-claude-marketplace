@@ -2,6 +2,10 @@
 description: Stop the Slack bot
 ---
 
-1. Find PID: `pgrep -f "slack_bot.py"`
-2. If found, `kill <PID>` and confirm.
-3. If not found, report the bot is not running.
+1. Check `SLACK_BOT_REPO_PATH` is set. If not, tell the user to set it and exit.
+2. Check if running: `docker ps --filter name=evaneos-slack-bot --format '{{.Status}}'`. If not running, report it and exit.
+3. Stop the container:
+   ```
+   cd "$SLACK_BOT_REPO_PATH" && docker compose down
+   ```
+4. Confirm stopped.
