@@ -48,6 +48,7 @@ if [ -f ~/.claude/statusline-services.json ]; then
     case "$type" in
       port) lsof -iTCP:"$value" -sTCP:LISTEN -t >/dev/null 2>&1 && running=true ;;
       pgrep) pgrep -f "$value" >/dev/null 2>&1 && running=true ;;
+      docker) docker ps --filter "name=$value" --filter "status=running" -q 2>/dev/null | grep -q . && running=true ;;
     esac
 
     if $running; then
