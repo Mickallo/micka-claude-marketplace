@@ -43,10 +43,36 @@ Fetch the board and output pipeline state summary:
 
 #### Source: Linear
 
-1. Fetch the issue from Linear
-2. Map fields: title, description, priority, tags
-3. Show to user for confirmation
-4. Create task
+1. Fetch the full issue using `mcp__plugin_linear_linear__get_issue` with `includeRelations: true`
+2. If the issue has a **project**, fetch it using `mcp__plugin_linear_linear__get_project` with `includeResources: true`
+3. If the issue has **attachments**, fetch each one using `mcp__plugin_linear_linear__get_attachment`
+4. Extract and preserve **verbatim** (do NOT summarize any field):
+   - `title`
+   - `description` (full markdown)
+   - `priority` (map: 1=urgent, 2=high, 3=medium, 4=low)
+   - `labels` → tags
+5. Build the task description as:
+   ```
+   **Linear:** <identifier>
+
+   <full issue description, copied verbatim>
+
+   ### Attachments
+   <for each attachment>
+   - [<title>](<url>): <subtitle>
+   </for>
+
+   ### Project: <project name>
+   <project description, copied verbatim>
+
+   #### Project Resources
+   <for each resource: documents, links>
+   - [<title>](<url>)
+   </for>
+   ```
+   Omit sections that are empty (no attachments, no project).
+6. Show to user for confirmation
+7. Create task
 
 #### Source: Manual
 
