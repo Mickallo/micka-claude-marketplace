@@ -1,0 +1,67 @@
+import { Hono } from "hono";
+import { serve } from "@hono/node-server";
+import fs from "fs";
+import path from "path";
+
+import pipelinesRoutes from "./routes/pipelines.js";
+import boardRoutes from "./routes/board.js";
+import taskRoutes from "./routes/tasks.js";
+import eventsRoutes from "./routes/events.js";
+import { setupTerminalWS } from "./terminal.js";
+
+const app = new Hono();
+
+// API routes
+app.route("/", pipelinesRoutes);
+app.route("/", boardRoutes);
+app.route("/", taskRoutes);
+app.route("/", eventsRoutes);
+
+// Serve static files from Svelte frontend build
+const staticRoot = path.resolve(import.meta.dirname, "..", "dist");
+
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html",
+  ".js": "application/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
+
+app.get("/*", (c, next) => {
+  // Don't intercept API routes
+  if (c.req.path.startsWith("/api/")) return next();
+
+  const reqPath = c.req.path === "/" ? "/index.html" : c.req.path;
+  let filePath = path.join(staticRoot, reqPath);
+
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    filePath = path.join(staticRoot, "index.html");
+  }
+
+  if (!filePath.startsWith(staticRoot)) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const contentType = MIME_TYPES[ext] || "application/octet-stream";
+  const data = fs.readFileSync(filePath);
+
+  return new Response(data, {
+    headers: { "Content-Type": contentType },
+  });
+});
+
+const port = parseInt(process.env.PORT || "5173");
+
+const server = serve({ fetch: app.fetch, port }, (info) => {
+  console.log(`Kanban server running on http://localhost:${info.port}`);
+});
+
+// Attach WebSocket terminal handler
+setupTerminalWS(server as unknown as import("http").Server);

@@ -1,0 +1,436 @@
+import { Hono } from "hono";
+import fs from "fs";
+import path from "path";
+import { getDb, renumberRanks, IMAGES_DIR } from "../db.js";
+import { getPipeline, getColumns, getTransitions, loadPipelines } from "../pipelines.js";
+import { eventBus } from "../events.js";
+import type { Task, Block } from "../types.js";
+
+const app = new Hono();
+
+// ── Create task ──────────────────────────────────────────
+
+app.post("/api/task", async (c) => {
+  const body = await c.req.json();
+  const db = getDb();
+  const title = body.title || "Untitled";
+  const priority = body.priority || "medium";
+  const pipelineName = body.pipeline || loadPipelines().default;
+  const description = body.description || null;
+  const tags =
+    body.tags !== undefined
+      ? typeof body.tags === "string"
+        ? body.tags
+        : JSON.stringify(body.tags)
+      : null;
+
+  const maxRankRow = db
+    .prepare("SELECT MAX(rank) as maxRank FROM tasks WHERE status = 'todo' AND pipeline = ?")
+    .get(pipelineName) as { maxRank: number | null } | undefined;
+  const rank = (maxRankRow?.maxRank ?? 0) + 1000;
+
+  const result = db
+    .prepare(
+      `INSERT INTO tasks (title, priority, pipeline, description, tags, rank)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(title, priority, pipelineName, description, tags, rank);
+
+  const id = result.lastInsertRowid as number;
+  eventBus.taskUpdated(id);
+  return c.json({ success: true, id });
+});
+
+// ── Get task ─────────────────────────────────────────────
+
+app.get("/api/task/:id", (c) => {
+  const id = parseInt(c.req.param("id"));
+  const db = getDb();
+  const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Task | undefined;
+  if (!task) return c.json({ error: "Not found" }, 404);
+  return c.json(task);
+});
+
+// ── Update task ──────────────────────────────────────────
+
+app.patch("/api/task/:id", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  const body = await c.req.json();
+  const db = getDb();
+
+  // Status transition validation
+  if (body.status !== undefined) {
+    const task = db
+      .prepare("SELECT status, pipeline FROM tasks WHERE id = ?")
+      .get(id) as { status: string; pipeline: string } | undefined;
+    if (task) {
+      const pipeline = getPipeline(task.pipeline);
+      const transitions = getTransitions(pipeline);
+      const allowed = transitions[task.status];
+      if (allowed && !allowed.includes(body.status)) {
+        return c.json(
+          { error: `Invalid transition: ${task.status} -> ${body.status}`, allowed },
+          400
+        );
+      }
+    }
+  }
+
+  const sets: string[] = [];
+  const values: unknown[] = [];
+
+  if (body.status !== undefined) {
+    const oldStatus = (
+      db.prepare("SELECT status, pipeline FROM tasks WHERE id = ?").get(id) as {
+        status: string;
+        pipeline: string;
+      } | undefined
+    );
+    sets.push("status = ?");
+    values.push(body.status);
+    if (oldStatus) {
+      const pipeline = getPipeline(oldStatus.pipeline);
+      const cols = getColumns(pipeline);
+      if (body.status === cols[1]) {
+        sets.push("started_at = COALESCE(started_at, datetime('now'))");
+      } else if (body.status === "done") {
+        sets.push("completed_at = datetime('now')");
+      } else if (body.status === "todo") {
+        sets.push("started_at = NULL");
+        sets.push("completed_at = NULL");
+      }
+      if (oldStatus.status !== body.status) {
+        setTimeout(() => eventBus.taskMoved(id, oldStatus.status, body.status), 0);
+      }
+    }
+  }
+  if (body.title !== undefined) { sets.push("title = ?"); values.push(body.title); }
+  if (body.priority !== undefined) { sets.push("priority = ?"); values.push(body.priority); }
+  if (body.pipeline !== undefined) { sets.push("pipeline = ?"); values.push(body.pipeline); }
+  if (body.description !== undefined) { sets.push("description = ?"); values.push(body.description); }
+  if (body.tags !== undefined) {
+    sets.push("tags = ?");
+    values.push(typeof body.tags === "string" ? body.tags : JSON.stringify(body.tags));
+  }
+  if (body.loop_count !== undefined) { sets.push("loop_count = ?"); values.push(body.loop_count); }
+  if (body.rank !== undefined) { sets.push("rank = ?"); values.push(body.rank); }
+
+  if (sets.length > 0) {
+    values.push(id);
+    db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    eventBus.taskUpdated(id);
+  }
+
+  return c.json({ success: true });
+});
+
+// ── Delete task ──────────────────────────────────────────
+
+app.delete("/api/task/:id", (c) => {
+  const id = parseInt(c.req.param("id"));
+  const db = getDb();
+  const task = db
+    .prepare("SELECT attachments FROM tasks WHERE id = ?")
+    .get(id) as { attachments: string | null } | undefined;
+  if (task?.attachments) {
+    try {
+      for (const a of JSON.parse(task.attachments)) {
+        try { fs.unlinkSync(path.join(IMAGES_DIR, a.storedName)); } catch { /* ok */ }
+      }
+    } catch { /* ok */ }
+  }
+  db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+  eventBus.taskUpdated(id);
+  return c.json({ success: true });
+});
+
+// ── Reorder ──────────────────────────────────────────────
+
+app.patch("/api/task/:id/reorder", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  const body = await c.req.json();
+  const db = getDb();
+
+  const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Task | undefined;
+  if (!task) return c.json({ error: "Not found" }, 404);
+
+  const targetStatus = body.status || task.status;
+
+  if (targetStatus !== task.status) {
+    const pipeline = getPipeline(task.pipeline);
+    const transitions = getTransitions(pipeline);
+    const allowed = transitions[task.status];
+    if (allowed && !allowed.includes(targetStatus)) {
+      return c.json(
+        { error: `Invalid transition: ${task.status} -> ${targetStatus}`, allowed },
+        400
+      );
+    }
+
+    const sets: string[] = ["status = ?"];
+    const vals: unknown[] = [targetStatus];
+    const cols = getColumns(pipeline);
+    if (targetStatus === cols[1]) {
+      sets.push("started_at = COALESCE(started_at, datetime('now'))");
+    } else if (targetStatus === "done") {
+      sets.push("completed_at = datetime('now')");
+    } else if (targetStatus === "todo") {
+      sets.push("started_at = NULL");
+      sets.push("completed_at = NULL");
+    }
+    vals.push(id);
+    db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+    eventBus.taskMoved(id, task.status, targetStatus);
+  }
+
+  let newRank: number;
+  const afterId = body.afterId as number | null;
+  const beforeId = body.beforeId as number | null;
+
+  if (afterId && beforeId) {
+    const above = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(afterId) as { rank: number } | undefined;
+    const below = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number } | undefined;
+    if (above && below) {
+      newRank = Math.floor((above.rank + below.rank) / 2);
+      if (newRank === above.rank) {
+        renumberRanks(db, targetStatus);
+        const a2 = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(afterId) as { rank: number };
+        const b2 = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number };
+        newRank = Math.floor((a2.rank + b2.rank) / 2);
+      }
+    } else {
+      newRank = 1000;
+    }
+  } else if (afterId) {
+    const above = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(afterId) as { rank: number } | undefined;
+    newRank = above ? above.rank + 1000 : 1000;
+  } else if (beforeId) {
+    const below = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number } | undefined;
+    if (below) {
+      newRank = Math.floor(below.rank / 2);
+      if (newRank === 0) {
+        renumberRanks(db, targetStatus);
+        const b2 = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number };
+        newRank = Math.floor(b2.rank / 2);
+      }
+    } else {
+      newRank = 1000;
+    }
+  } else {
+    newRank = 1000;
+  }
+
+  db.prepare("UPDATE tasks SET rank = ? WHERE id = ?").run(newRank, id);
+  eventBus.taskUpdated(id);
+  return c.json({ success: true, rank: newRank });
+});
+
+// ── Blocks ───────────────────────────────────────────────
+
+app.post("/api/task/:id/block", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  const body = await c.req.json();
+  const db = getDb();
+
+  const task = db.prepare("SELECT blocks FROM tasks WHERE id = ?").get(id) as { blocks: string | null } | undefined;
+  if (!task) return c.json({ error: "Not found" }, 404);
+
+  const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
+  const newBlock: Block = {
+    agent: body.agent || "unknown",
+    agent_id: body.agent_id || null,
+    content: body.content || "",
+    decision_log: body.decision_log || "",
+    verdict: body.verdict === "nok" ? "nok" : body.verdict === "relay" ? "relay" : "ok",
+    timestamp: new Date().toISOString(),
+  };
+  blocks.push(newBlock);
+
+  db.prepare("UPDATE tasks SET blocks = ? WHERE id = ?").run(JSON.stringify(blocks), id);
+  eventBus.blockAdded(id, newBlock.agent, newBlock.verdict);
+  return c.json({ success: true, block: newBlock });
+});
+
+// ── Gates ────────────────────────────────────────────────
+
+app.post("/api/task/:id/gate", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  const body = await c.req.json();
+  const db = getDb();
+
+  const task = db
+    .prepare("SELECT status, pipeline, notes FROM tasks WHERE id = ?")
+    .get(id) as { status: string; pipeline: string; notes: string | null } | undefined;
+  if (!task) return c.json({ error: "Not found" }, 404);
+  if (!task.status.startsWith("awaiting:")) {
+    return c.json({ error: "Task is not awaiting validation" }, 400);
+  }
+
+  const stage = task.status.slice("awaiting:".length);
+  const pipeline = getPipeline(task.pipeline);
+  const columns = getColumns(pipeline);
+  const stageIdx = columns.indexOf(stage);
+
+  if (body.action === "approve") {
+    const nextStage = columns[stageIdx + 1] || "done";
+    const sets = ["status = ?", "loop_count = 0"];
+    const vals: unknown[] = [nextStage];
+    if (nextStage === "done") sets.push("completed_at = datetime('now')");
+    vals.push(id);
+    db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+    eventBus.taskMoved(id, task.status, nextStage);
+    return c.json({ success: true, status: nextStage });
+  }
+
+  if (body.action === "refuse") {
+    const comment = body.comment || "";
+    if (!comment.trim()) {
+      return c.json({ error: "A comment is required when refusing" }, 400);
+    }
+    const notes = task.notes ? JSON.parse(task.notes) : [];
+    notes.push({
+      id: Date.now(),
+      text: comment,
+      author: "user",
+      timestamp: new Date().toISOString(),
+    });
+    db.prepare("UPDATE tasks SET status = ?, notes = ? WHERE id = ?")
+      .run(stage, JSON.stringify(notes), id);
+    eventBus.taskMoved(id, task.status, stage);
+    return c.json({ success: true, status: stage });
+  }
+
+  return c.json({ error: "action must be 'approve' or 'refuse'" }, 400);
+});
+
+// ── Notes ────────────────────────────────────────────────
+
+app.post("/api/task/:id/note", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  const body = await c.req.json();
+  const db = getDb();
+
+  const task = db
+    .prepare("SELECT notes, loop_count FROM tasks WHERE id = ?")
+    .get(id) as { notes: string | null; loop_count: number } | undefined;
+  if (!task) return c.json({ error: "Not found" }, 404);
+
+  const notes = task.notes ? JSON.parse(task.notes) : [];
+  const note = {
+    id: Date.now(),
+    text: body.text || "",
+    author: body.author || "user",
+    timestamp: new Date().toISOString(),
+  };
+  notes.push(note);
+
+  const all = loadPipelines();
+  const isBlocked = task.loop_count >= all.max_loops;
+  const resetLoopCount = isBlocked && (body.author === "user" || !body.author);
+
+  if (resetLoopCount) {
+    db.prepare("UPDATE tasks SET notes = ?, loop_count = 0 WHERE id = ?").run(JSON.stringify(notes), id);
+  } else {
+    db.prepare("UPDATE tasks SET notes = ? WHERE id = ?").run(JSON.stringify(notes), id);
+  }
+
+  eventBus.taskUpdated(id);
+  return c.json({ success: true, note, loop_count_reset: resetLoopCount });
+});
+
+app.delete("/api/task/:id/note/:noteId", (c) => {
+  const id = parseInt(c.req.param("id"));
+  const noteId = parseInt(c.req.param("noteId"));
+  const db = getDb();
+
+  const task = db.prepare("SELECT notes FROM tasks WHERE id = ?").get(id) as { notes: string | null } | undefined;
+  if (!task) return c.json({ error: "Not found" }, 404);
+
+  const notes = task.notes ? JSON.parse(task.notes) : [];
+  const filtered = notes.filter((n: { id: number }) => n.id !== noteId);
+  db.prepare("UPDATE tasks SET notes = ? WHERE id = ?").run(JSON.stringify(filtered), id);
+
+  eventBus.taskUpdated(id);
+  return c.json({ success: true });
+});
+
+// ── Attachments ──────────────────────────────────────────
+
+app.post("/api/task/:id/attachment", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  const body = await c.req.json();
+  const db = getDb();
+
+  const task = db
+    .prepare("SELECT attachments FROM tasks WHERE id = ?")
+    .get(id) as { attachments: string | null } | undefined;
+  if (!task) return c.json({ error: "Not found" }, 404);
+
+  const filename = (body.filename || "image.png").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const ext = path.extname(filename) || ".png";
+  const safeName = `${id}_${Date.now()}${ext}`;
+  const filePath = path.resolve(IMAGES_DIR, safeName);
+
+  const base64Data = body.data.replace(/^data:[^;]+;base64,/, "");
+  fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
+
+  const attachments = task.attachments ? JSON.parse(task.attachments) : [];
+  attachments.push({
+    filename: body.filename || "image.png",
+    storedName: safeName,
+    url: `/api/uploads/${safeName}`,
+    size: fs.statSync(filePath).size,
+    uploaded_at: new Date().toISOString(),
+  });
+
+  db.prepare("UPDATE tasks SET attachments = ? WHERE id = ?").run(JSON.stringify(attachments), id);
+  eventBus.taskUpdated(id);
+  return c.json({ success: true, attachment: attachments[attachments.length - 1] });
+});
+
+app.delete("/api/task/:id/attachment/:storedName", (c) => {
+  const id = parseInt(c.req.param("id"));
+  const storedName = c.req.param("storedName");
+  const db = getDb();
+
+  const task = db.prepare("SELECT attachments FROM tasks WHERE id = ?").get(id) as { attachments: string | null } | undefined;
+  if (!task) return c.json({ error: "Not found" }, 404);
+
+  const attachments = task.attachments ? JSON.parse(task.attachments) : [];
+  const idx = attachments.findIndex((a: { storedName: string }) => a.storedName === storedName);
+  if (idx >= 0) {
+    const removed = attachments.splice(idx, 1)[0];
+    try { fs.unlinkSync(path.join(IMAGES_DIR, removed.storedName)); } catch { /* ok */ }
+    db.prepare("UPDATE tasks SET attachments = ? WHERE id = ?").run(JSON.stringify(attachments), id);
+  }
+
+  eventBus.taskUpdated(id);
+  return c.json({ success: true });
+});
+
+// ── Uploads (serve images) ───────────────────────────────
+
+app.get("/api/uploads/:filename", (c) => {
+  const filename = c.req.param("filename").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const filePath = path.resolve(IMAGES_DIR, filename);
+
+  if (!filePath.startsWith(IMAGES_DIR)) return c.json({ error: "Forbidden" }, 403);
+  if (!fs.existsSync(filePath)) return c.json({ error: "Not found" }, 404);
+
+  const ext = path.extname(filename).toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+  };
+  const contentType = mimeTypes[ext] || "application/octet-stream";
+  const data = fs.readFileSync(filePath);
+
+  return new Response(data, {
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
+});
+
+export default app;

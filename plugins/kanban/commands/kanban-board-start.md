@@ -5,19 +5,19 @@ description: "Start the kanban board web UI server"
 
 ## Procedure
 
-### 1. Resolve board path
+### 1. Resolve server path
 
 ```bash
-echo "${CLAUDE_PLUGIN_ROOT}/kanban-board"
+echo "${CLAUDE_PLUGIN_ROOT}/kanban-server"
 ```
 
-Store as `BOARD_DIR`.
+Store as `SERVER_DIR`.
 
 ### 2. Ensure dependencies installed
 
 ```bash
-if [ ! -d "$BOARD_DIR/node_modules" ]; then
-  pnpm --dir "$BOARD_DIR" install
+if [ ! -d "$SERVER_DIR/node_modules" ]; then
+  pnpm --dir "$SERVER_DIR" install
 fi
 ```
 
@@ -33,7 +33,7 @@ fi
 ### 4. Start server in background
 
 ```bash
-nohup env KANBAN_PROJECT_ROOT="$(pwd)" pnpm --dir "$BOARD_DIR" dev > /tmp/kanban-board.log 2>&1 &
+nohup env KANBAN_PROJECT_ROOT="$(pwd)" pnpm --dir "$SERVER_DIR" start > /tmp/kanban-board.log 2>&1 &
 echo $! > /tmp/kanban-board.pid
 ```
 
