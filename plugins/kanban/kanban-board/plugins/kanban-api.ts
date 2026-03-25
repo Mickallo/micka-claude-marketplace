@@ -20,6 +20,7 @@ if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
 
 interface PipelineConfig {
   stages: string[];
+  gates?: string[];
 }
 
 interface PipelinesFile {
@@ -30,7 +31,7 @@ interface PipelinesFile {
 
 const DEFAULT_PIPELINES: PipelinesFile = {
   pipelines: {
-    full: { stages: ["Resolver", "Planner", "Critic", "Builder", "Shield", "Inspector", "Ranger"] },
+    full: { stages: ["Resolver", "Planner", "Critic", "Builder", "Inspector", "Ranger"], gates: [] },
     quick: { stages: ["Resolver", "Builder", "Ranger"] },
   },
   default: "full",
@@ -84,9 +85,23 @@ function getTransitions(pipeline: PipelineConfig): Record<string, string[]> {
     const allowed: string[] = [];
     if (i < columns.length - 1) allowed.push(columns[i + 1]);
     if (i > 0) allowed.push(columns[i - 1]);
+    // Allow transition to awaiting:X (gate sub-state) for gated stages
+    const gates = pipeline.gates || [];
+    if (gates.includes(columns[i])) {
+      allowed.push(`awaiting:${columns[i]}`);
+    }
     transitions[columns[i]] = allowed;
   }
   transitions["done"] = [];
+  // Add transitions FROM awaiting:X states
+  const gates = pipeline.gates || [];
+  for (const gate of gates) {
+    const idx = columns.indexOf(gate);
+    if (idx === -1) continue;
+    const allowed: string[] = [gate]; // refuse → replay same stage
+    if (idx < columns.length - 1) allowed.push(columns[idx + 1]); // approve → next stage
+    transitions[`awaiting:${gate}`] = allowed;
+  }
   return transitions;
 }
 
@@ -242,9 +257,10 @@ function renumberRanks(db: Database.Database, status: string) {
 
 interface Block {
   agent: string;
+  agent_id: string | null;
   content: string;
   decision_log: string;
-  verdict: "ok" | "nok";
+  verdict: "ok" | "nok" | "relay";
   timestamp: string;
 }
 
@@ -354,6 +370,14 @@ export function kanbanApiPlugin(): Plugin {
           for (const t of tasks) {
             if (columns[t.status]) {
               columns[t.status].push(t);
+            } else if (t.status.startsWith("awaiting:")) {
+              // Group awaiting:X tasks into the X column
+              const parentStage = t.status.slice("awaiting:".length);
+              if (columns[parentStage]) {
+                columns[parentStage].push(t);
+              } else {
+                columns["todo"].push(t);
+              }
             } else {
               columns["todo"].push(t);
             }
@@ -610,9 +634,10 @@ export function kanbanApiPlugin(): Plugin {
           const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
           const newBlock: Block = {
             agent: body.agent || "unknown",
+            agent_id: body.agent_id || null,
             content: body.content || "",
             decision_log: body.decision_log || "",
-            verdict: body.verdict === "nok" ? "nok" : "ok",
+            verdict: body.verdict === "nok" ? "nok" : body.verdict === "relay" ? "relay" : "ok",
             timestamp: new Date().toISOString(),
           };
           blocks.push(newBlock);
@@ -621,6 +646,72 @@ export function kanbanApiPlugin(): Plugin {
 
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ success: true, block: newBlock }));
+          return;
+        }
+
+        // ── Gate (approve / refuse) ─────────────────
+
+        const gateMatch = pathname.match(/^\/api\/task\/(\d+)\/gate$/);
+        if (gateMatch && req.method === "POST") {
+          const id = parseInt(gateMatch[1]);
+          const body = await parseBody(req);
+          const db = getDb();
+
+          const task = db
+            .prepare("SELECT status, pipeline, notes FROM tasks WHERE id = ?")
+            .get(id) as { status: string; pipeline: string; notes: string | null } | undefined;
+          if (!task) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+          if (!task.status.startsWith("awaiting:")) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Task is not awaiting validation" }));
+            return;
+          }
+
+          const stage = task.status.slice("awaiting:".length);
+          const pipeline = getPipeline(task.pipeline);
+          const columns = getColumns(pipeline);
+          const stageIdx = columns.indexOf(stage);
+
+          if (body.action === "approve") {
+            const nextStage = columns[stageIdx + 1] || "done";
+            const sets = ["status = ?", "loop_count = 0"];
+            const vals: any[] = [nextStage];
+            if (nextStage === "done") sets.push("completed_at = datetime('now')");
+            vals.push(id);
+            db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ success: true, status: nextStage }));
+            return;
+          }
+
+          if (body.action === "refuse") {
+            const comment = body.comment || "";
+            if (!comment.trim()) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "A comment is required when refusing" }));
+              return;
+            }
+            // Add note with the refusal comment
+            const notes = task.notes ? JSON.parse(task.notes) : [];
+            notes.push({
+              id: Date.now(),
+              text: comment,
+              author: "user",
+              timestamp: new Date().toISOString(),
+            });
+            db.prepare("UPDATE tasks SET status = ?, notes = ? WHERE id = ?")
+              .run(stage, JSON.stringify(notes), id);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ success: true, status: stage }));
+            return;
+          }
+
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "action must be 'approve' or 'refuse'" }));
           return;
         }
 

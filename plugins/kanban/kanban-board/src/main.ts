@@ -209,6 +209,8 @@ function renderCard(task: Task): string {
 
   const isBlocked = task.loop_count >= currentMaxLoops;
   const blockedBadge = isBlocked ? `<span class="badge blocked">BLOCKED</span>` : "";
+  const isAwaiting = task.status.startsWith("awaiting:");
+  const awaitingBadge = isAwaiting ? `<span class="badge awaiting">AWAITING</span>` : "";
 
   const blocks: Block[] = parseJsonArray(task.blocks);
   const last = blocks.length > 0 ? blocks[blocks.length - 1] : null;
@@ -221,10 +223,10 @@ function renderCard(task: Task): string {
   const notesBadge = noteCount > 0 ? `<span class="badge notes-count" title="${noteCount} note(s)">\u{1F4AC} ${noteCount}</span>` : "";
 
   return `
-    <div class="card ${isBlocked ? 'card-blocked' : ''}" draggable="true" data-id="${task.id}" data-status="${task.status}" data-completed-at="${task.completed_at || ''}">
+    <div class="card ${isBlocked ? 'card-blocked' : ''} ${isAwaiting ? 'card-awaiting' : ''}" draggable="true" data-id="${task.id}" data-status="${task.status}" data-completed-at="${task.completed_at || ''}">
       <div class="card-header">
         <span class="card-id">#${task.id}</span>
-        ${pBadge}${blockedBadge}${verdictBadge}
+        ${pBadge}${blockedBadge}${awaitingBadge}${verdictBadge}
       </div>
       <div class="card-title">${task.title}</div>
       ${desc ? `<div class="card-desc">${desc}</div>` : ""}
@@ -270,7 +272,8 @@ async function showTaskDetail(id: number) {
   try {
     const task: Task = await (await fetch(`/api/task/${id}`)).json();
     const columns = ["todo", ...(cachedColumnOrder.slice(1, -1)), "done"];
-    const currentIdx = Math.max(0, columns.indexOf(task.status));
+    const awaitingStage = task.status.startsWith("awaiting:") ? task.status.slice("awaiting:".length) : null;
+    const currentIdx = Math.max(0, awaitingStage ? columns.indexOf(awaitingStage) : columns.indexOf(task.status));
 
     const tags = parseTags(task.tags);
     const tagsHtml = tags.length ? `<div class="modal-tags">${tags.map(t => `<span class="tag">${t}</span>`).join("")}</div>` : "";
@@ -292,6 +295,17 @@ async function showTaskDetail(id: number) {
     const isBlocked = task.loop_count >= currentMaxLoops;
     const blockedHtml = isBlocked
       ? `<div class="blocked-banner"><strong>BLOCKED</strong> — ${task.loop_count} failed loops (max: ${currentMaxLoops}). Add a comment to unblock.</div>` : "";
+    const awaitingHtml = awaitingStage
+      ? `<div class="awaiting-banner">
+          <div class="awaiting-text"><strong>AWAITING VALIDATION</strong> — Stage <strong>${awaitingStage}</strong> completed.</div>
+          <div class="awaiting-actions">
+            <button class="gate-btn gate-approve" id="gate-approve">Approve</button>
+            <div class="gate-refuse-group">
+              <textarea id="gate-refuse-comment" rows="2" placeholder="Reason for refusal (required)..."></textarea>
+              <button class="gate-btn gate-refuse" id="gate-refuse">Refuse</button>
+            </div>
+          </div>
+        </div>` : "";
 
     const attachments = parseJsonArray(task.attachments);
     const attachmentsHtml = attachments.length > 0
@@ -337,7 +351,7 @@ async function showTaskDetail(id: number) {
 
     content.innerHTML = `
       <h1>#${task.id} ${task.title}</h1>
-      <div class="modal-meta">${meta}</div>${tagsHtml}${blockedHtml}${progressHtml}
+      <div class="modal-meta">${meta}</div>${tagsHtml}${blockedHtml}${awaitingHtml}${progressHtml}
       <div class="lifecycle-sections">${requirementSection}${blocksHtml}</div>
       <div class="notes-section ${isBlocked ? 'notes-highlighted' : ''}">
         <div class="notes-header"><span>${isBlocked ? '\u{1F6A8} Add a comment to unblock' : 'Notes'}</span><span class="notes-count">${notes.length}</span></div>
@@ -394,6 +408,26 @@ async function showTaskDetail(id: number) {
     content.querySelectorAll(".note-delete").forEach(btn => {
       btn.addEventListener("click", async e => { e.stopPropagation(); await fetch(`/api/task/${id}/note/${(btn as HTMLElement).dataset.noteId}`, { method: "DELETE" }); showTaskDetail(id); });
     });
+
+    // Gate approve/refuse handlers
+    const approveBtn = document.getElementById("gate-approve");
+    const refuseBtn = document.getElementById("gate-refuse");
+    if (approveBtn) {
+      approveBtn.addEventListener("click", async () => {
+        await fetch(`/api/task/${id}/gate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve" }) });
+        showTaskDetail(id);
+        refreshCurrentView();
+      });
+    }
+    if (refuseBtn) {
+      refuseBtn.addEventListener("click", async () => {
+        const comment = (document.getElementById("gate-refuse-comment") as HTMLTextAreaElement).value.trim();
+        if (!comment) { (document.getElementById("gate-refuse-comment") as HTMLTextAreaElement).focus(); return; }
+        await fetch(`/api/task/${id}/gate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "refuse", comment }) });
+        showTaskDetail(id);
+        refreshCurrentView();
+      });
+    }
   } catch {
     content.innerHTML = '<div style="color:#ef4444">Failed to load</div>';
   }

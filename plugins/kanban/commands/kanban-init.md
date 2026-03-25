@@ -50,7 +50,10 @@ Create `~/.claude/kanban/pipelines.json` if it doesn't already exist:
 ```json
 {
   "pipelines": {
-    "full": { "stages": ["Planner", "Critic", "Builder", "Shield", "Inspector", "Ranger"] },
+    "full": {
+      "stages": ["Planner", "Critic", "Builder", "Shield", "Inspector", "Ranger"],
+      "gates": []
+    },
     "quick": { "stages": ["Builder", "Ranger"] }
   },
   "default": "full",

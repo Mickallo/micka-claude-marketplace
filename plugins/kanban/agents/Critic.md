@@ -38,10 +38,10 @@ The orchestrator provides: task ID, title, description, previous blocks (includi
 
 ## Decision Rule
 
-- Average >= 4.0 → `ok`
-- Average < 3.0 OR any score = 1 → `nok`
-- Done-When Quality <= 2 → `nok` + recommend `/kanban-refine`
-- 3.0-3.9 → `ok` with improvement suggestions
+- Average >= 4.5 → `ok`
+- 4.0-4.4 → `ok` with improvement suggestions
+- Average < 4.0 OR any score = 1 → `nok`
+- Done-When Quality <= 3 → `nok` + recommend `/kanban-refine`
 - **Unresolved ambiguity** → `nok` regardless of score
 
 ## Output

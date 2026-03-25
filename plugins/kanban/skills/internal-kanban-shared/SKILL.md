@@ -15,25 +15,30 @@ Pipelines are defined in `~/.claude/kanban/pipelines.json` (user-level):
 ```json
 {
   "pipelines": {
-    "full": { "stages": ["Resolver", "Planner", "Critic", "Builder", "Shield", "Inspector", "Ranger"] },
-    "quick": { "stages": ["Builder", "Ranger"] }
+    "full": {
+      "stages": ["Resolver", "Planner", "Critic", "Builder", "Inspector", "Ranger"],
+      "gates": ["Critic", "Inspector"]
+    },
+    "quick": { "stages": ["Resolver", "Builder", "Ranger"] }
   },
   "default": "full",
   "max_loops": 3
 }
 ```
 
-Each pipeline is a named sequence of agents. Each task has a `pipeline` field that determines which stages it goes through.
+Each pipeline is a named sequence of agents. Each task has a `pipeline` field that determines which stages it goes through. Pipelines may include a `gates` array listing stages that require user validation before advancing.
 
 ### Flow Rules
 
 - **OK** → move to next stage
 - **NOK** → move to previous stage, increment `loop_count`
+- **RELAY** → move to previous stage, do not increment `loop_count` (agent forwarding a problem it cannot resolve)
 - **loop_count >= max_loops** → task is BLOCKED. User must add a comment to reset `loop_count` to 0.
+- **GATE** → when a gated stage returns OK, task enters `awaiting:<stage>` sub-state. User must approve (advance) or refuse with comment (replay same stage). Gates block even in `--auto` mode.
 
 ### Columns
 
-Board columns = `["todo", ...stages, "done"]`. Dynamic per pipeline.
+Board columns = `["todo", ...stages, "done"]`. Dynamic per pipeline. Tasks with `awaiting:X` status are displayed in the `X` column with a visual badge.
 
 ### Valid Transitions
 
@@ -80,12 +85,15 @@ All agent output is stored as ordered blocks in the `blocks` JSON array:
 ```json
 {
   "agent": "Planner",
+  "agent_id": "a1b2c3d4e5f",
   "content": "## Plan\n...\n\n## Done When\n- [ ] ...",
   "decision_log": "Used X because Y...",
-  "verdict": "ok",
+  "verdict": "ok | nok | relay",
   "timestamp": "2026-03-18T10:00:00.000Z"
 }
 ```
+
+`agent_id` is the Claude Code agent ID returned by the `Agent` tool. Used to resume the same agent via `SendMessage` on NOK retries instead of spawning a new one.
 
 Agents do NOT write to the API directly. The orchestrator dispatches agents, parses their response, and writes the block.
 
@@ -115,7 +123,11 @@ curl -s -X POST http://localhost:5173/api/task -H 'Content-Type: application/jso
 curl -s -X DELETE http://localhost:5173/api/task/$ID
 
 # Add block (used by orchestrator)
-curl -s -X POST http://localhost:5173/api/task/$ID/block -H 'Content-Type: application/json' -d '{"agent": "Planner", "content": "...", "decision_log": "...", "verdict": "ok"}'
+curl -s -X POST http://localhost:5173/api/task/$ID/block -H 'Content-Type: application/json' -d '{"agent": "Planner", "agent_id": "...", "content": "...", "decision_log": "...", "verdict": "ok"}'
+
+# Gate validation (approve or refuse with mandatory comment)
+curl -s -X POST http://localhost:5173/api/task/$ID/gate -H 'Content-Type: application/json' -d '{"action": "approve"}'
+curl -s -X POST http://localhost:5173/api/task/$ID/gate -H 'Content-Type: application/json' -d '{"action": "refuse", "comment": "..."}'
 
 # Notes (resets loop_count if task is blocked)
 curl -s -X POST http://localhost:5173/api/task/$ID/note -H 'Content-Type: application/json' -d '{"text": "..."}'
@@ -133,7 +145,7 @@ Agents return:
 [reasoning]
 
 ## Verdict
-ok
+ok | nok | relay
 ```
 
 ## Error Handling
