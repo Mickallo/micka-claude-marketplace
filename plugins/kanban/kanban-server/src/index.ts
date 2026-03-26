@@ -44,61 +44,32 @@ function cleanupRunningBlocks() {
 
 cleanupRunningBlocks();
 
-// Migrate: merge description and notes into blocks for existing tasks
-function migrateDescriptionAndNotes() {
+
+// Migrate: user info blocks (except first) are old refuse → nok
+function migrateUserInfoToNok() {
   const db = getDb();
-  const tasks = db.prepare("SELECT id, description, notes, blocks, created_at FROM tasks").all() as (Task & { created_at: string })[];
+  const tasks = db.prepare("SELECT id, blocks FROM tasks").all() as Task[];
   let migrated = 0;
   for (const task of tasks) {
     const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
-    const notes = task.notes ? JSON.parse(task.notes) : [];
     let changed = false;
-
-    // Check if description is already in blocks (first user block)
-    const hasDescBlock = blocks.some(b => b.agent === "user" && b.verdict === "info" && blocks.indexOf(b) === 0);
-
-    // Add description as first block if not already there
-    if (task.description && !hasDescBlock) {
-      blocks.unshift({
-        agent: "user",
-        agent_id: null,
-        content: task.description,
-        decision_log: "",
-        verdict: "info",
-        timestamp: task.created_at || new Date().toISOString(),
-      });
-      changed = true;
-    }
-
-    // Add notes that aren't already in blocks
-    for (const note of notes) {
-      const alreadyMigrated = blocks.some(b =>
-        b.agent === (note.author || "user") &&
-        b.verdict === "info" &&
-        b.content === note.text
-      );
-      if (!alreadyMigrated) {
-        blocks.push({
-          agent: note.author || "user",
-          agent_id: null,
-          content: note.text || "",
-          decision_log: "",
-          verdict: "info",
-          timestamp: note.timestamp || new Date().toISOString(),
-        });
+    let isFirst = true;
+    for (const block of blocks) {
+      if (block.agent === "user" && block.verdict === "info") {
+        if (isFirst) { isFirst = false; continue; }
+        block.verdict = "nok";
         changed = true;
       }
     }
-
     if (changed) {
       db.prepare("UPDATE tasks SET blocks = ? WHERE id = ?").run(JSON.stringify(blocks), task.id);
       migrated++;
     }
   }
-  if (migrated > 0) console.log(`Migrated description/notes to blocks for ${migrated} task(s)`);
+  if (migrated > 0) console.log(`Migrated user info blocks to nok for ${migrated} task(s)`);
 }
 
-migrateDescriptionAndNotes();
+migrateUserInfoToNok();
 
 const app = new Hono();
 

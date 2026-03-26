@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { X, Clock, AlertCircle, CheckCircle, Loader2, Play, Trash2, Terminal as TerminalIcon, Copy, Check, Send } from "lucide-svelte";
+  import { X, Clock, AlertCircle, CheckCircle, Loader2, Play, Trash2, Terminal as TerminalIcon, Copy, Check, ChevronRight } from "lucide-svelte";
   import { cn } from "../lib/cn";
   import { md } from "../lib/markdown";
-  import type { Task, Block, Note, Attachment } from "../lib/types";
-  import { fetchTask, patchTask, deleteTask, gateAction, addNote, deleteNote, addAttachment, deleteAttachment, runPipeline, stopPipeline } from "../lib/api";
+  import type { Task, Block, Attachment } from "../lib/types";
+  import { fetchTask, patchTask, deleteTask, gateAction, runPipeline, stopPipeline } from "../lib/api";
   import { parseJsonArray } from "../lib/utils";
   import TerminalView from "./Terminal.svelte";
   import { formatDistanceToNow } from "../lib/time";
@@ -19,19 +19,20 @@
   } = $props();
 
   let task: Task | null = $state(null);
-  let noteText = $state("");
   let refuseComment = $state("");
   let selectedBlockIdx: number | null = $state(null);
   let terminalBlockIdx: number | null = $state(null);
   let copied = $state<number | null>(null);
 
   let blocks = $derived(task ? parseJsonArray<Block>(task.blocks) : []);
-  let notes = $derived(task ? parseJsonArray<Note>(task.notes) : []);
   let attachments = $derived(task ? parseJsonArray<Attachment>(task.attachments) : []);
   let isBlocked = $derived(task ? task.loop_count >= maxLoops : false);
   let awaitingStage = $derived(task?.status.startsWith("awaiting:") ? task.status.slice("awaiting:".length) : null);
   let hasRunningBlock = $derived(blocks.some(b => b.verdict === "running"));
-  let selectedBlock = $derived(selectedBlockIdx !== null ? blocks[selectedBlockIdx] ?? null : null);
+  let selectedBlock = $derived(selectedBlockIdx !== null && selectedBlockIdx >= 0 ? blocks[selectedBlockIdx] ?? null : null);
+  let isActionSelected = $derived(selectedBlockIdx === -1);
+  let needsAction = $derived(!!awaitingStage || isBlocked);
+  let hasDetailOpen = $derived(selectedBlock !== null || isActionSelected);
   let detailTab: "content" | "decision_log" | "terminal" = $state("content");
   let canResume = $derived(
     selectedBlock !== null &&
@@ -63,12 +64,6 @@
     refuseComment = "";
     load();
   }
-  async function handleAddNote() {
-    if (!task || !noteText.trim()) return;
-    await addNote(task.id, noteText);
-    noteText = "";
-    load();
-  }
   async function handleDelete() {
     if (!task || !confirm(`Delete ticket #${task.id}?`)) return;
     await deleteTask(task.id);
@@ -97,7 +92,7 @@
 <!-- Sheet from right — widens when a block is selected -->
 <div class={cn(
   "fixed inset-y-0 right-0 z-50 flex flex-col bg-background border-l shadow-xl animate-slide-in transition-[max-width] duration-200",
-  selectedBlock ? "w-full max-w-6xl" : "w-full sm:max-w-xl md:max-w-2xl"
+  hasDetailOpen ? "w-full max-w-6xl" : "w-full sm:max-w-xl md:max-w-2xl"
 )}>
   {#if !task}
     <div class="flex-1 flex items-center justify-center text-muted-foreground">
@@ -183,23 +178,6 @@
         {/each}
       </div>
 
-      <!-- Gate actions -->
-      {#if awaitingStage}
-        <div class="flex items-center gap-2 mt-4">
-          <button class="px-3 py-1.5 text-sm font-medium rounded-md bg-success text-success-foreground hover:bg-success/90" onclick={handleApprove}>
-            Approve
-          </button>
-          <input
-            class="flex-1 px-3 py-1.5 text-sm rounded-md bg-secondary border border-border"
-            placeholder="Reason for refusal..."
-            bind:value={refuseComment}
-          />
-          <button class="px-3 py-1.5 text-sm font-medium rounded-md bg-destructive/15 text-destructive hover:bg-destructive/25" onclick={handleRefuse}>
-            Refuse
-          </button>
-        </div>
-      {/if}
-
       <!-- Actions -->
       <div class="flex items-center gap-2 mt-4">
         {#if hasRunningBlock}
@@ -229,7 +207,7 @@
       <!-- Left: Blocks list -->
       <div class={cn(
         "flex flex-col border-r shrink-0 overflow-hidden transition-[width] duration-200",
-        selectedBlock ? "w-72" : "w-full"
+        hasDetailOpen ? "w-72" : "w-full"
       )}>
         <div class="flex-1 overflow-y-auto p-3">
           {#if blocks.length === 0}
@@ -247,7 +225,7 @@
               {#each blocks as block, idx}
                 {@const bcolor = getAgentColor(block.agent)}
                 {@const isRunning = block.verdict === "running"}
-                {@const isUser = block.verdict === "info"}
+                {@const isUser = block.agent === "user"}
                 {@const isSelected = selectedBlockIdx === idx}
                 <button
                   class={cn(
@@ -281,7 +259,7 @@
                       </span>
                       {#if isRunning}
                         <span class="text-[9px] px-1 py-0.5 rounded bg-primary/20 text-primary leading-none">running</span>
-                      {:else if !isUser}
+                      {:else if block.verdict !== "info"}
                         <span class={cn(
                           "text-[9px] px-1 py-0.5 rounded leading-none",
                           block.verdict === "ok" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive"
@@ -292,34 +270,123 @@
                   </div>
                 </button>
               {/each}
+
+              <!-- Action required block (gate or blocked) -->
+              {#if needsAction}
+                <button
+                  class={cn(
+                    "w-full flex items-center gap-2.5 p-3 rounded-lg border-2 text-left transition-all animate-gate-pulse",
+                    isBlocked ? "border-destructive/50 bg-destructive/5 hover:bg-destructive/10" : "border-warning/50 bg-warning/10 hover:bg-warning/15",
+                    isActionSelected && isBlocked && "bg-destructive/15 border-destructive shadow-md shadow-destructive/10",
+                    isActionSelected && !isBlocked && "bg-warning/20 border-warning shadow-md shadow-warning/10"
+                  )}
+                  onclick={() => { selectedBlockIdx = selectedBlockIdx === -1 ? null : -1; detailTab = "content"; }}
+                >
+                  <div class={cn(
+                    "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold shadow-sm",
+                    isBlocked ? "bg-destructive text-destructive-foreground" : "bg-warning text-warning-foreground"
+                  )}>
+                    !
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-1.5">
+                      <span class={cn("font-medium text-sm", isBlocked ? "text-destructive" : "text-warning")}>
+                        {isBlocked ? "Blocked" : awaitingStage}
+                      </span>
+                      <span class={cn(
+                        "text-[9px] px-1.5 py-0.5 rounded-full font-semibold leading-none",
+                        isBlocked ? "bg-destructive/20 text-destructive" : "bg-warning/30 text-warning"
+                      )}>action required</span>
+                    </div>
+                    <span class="text-[10px] text-muted-foreground">
+                      {isBlocked ? `Looped ${task?.loop_count}/${maxLoops} times — give feedback` : "Click to review & validate"}
+                    </span>
+                  </div>
+                  <div class="shrink-0">
+                    <ChevronRight class={cn("w-4 h-4", isBlocked ? "text-destructive" : "text-warning")} />
+                  </div>
+                </button>
+              {/if}
             </div>
           {/if}
         </div>
 
-        <!-- Note input -->
-        <div class="p-3 border-t bg-card shrink-0">
-          <div class="flex gap-1.5">
-            <input
-              class={cn(
-                "flex-1 px-2.5 py-1.5 text-sm rounded-md bg-secondary border border-border",
-                selectedBlock && "text-xs"
-              )}
-              placeholder={isBlocked ? "Comment to unblock..." : "Add a note..."}
-              bind:value={noteText}
-              onkeydown={(e) => e.key === "Enter" && handleAddNote()}
-            />
-            <button
-              class="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-              onclick={handleAddNote}
-            >
-              <Send class="w-3 h-3" />
-            </button>
-          </div>
-        </div>
       </div>
 
-      <!-- Right: Block detail -->
-      {#if selectedBlock}
+      <!-- Right: Detail panel -->
+      {#if isActionSelected && needsAction}
+        <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <!-- Action header -->
+          <div class="flex items-center justify-between px-4 py-2 border-b bg-card shrink-0">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class={cn(
+                "w-7 h-7 rounded-md flex items-center justify-center shrink-0 text-white text-xs font-bold",
+                isBlocked ? "bg-destructive" : ""
+              )} style={!isBlocked && awaitingStage ? `background: ${getAgentColor(awaitingStage)}` : ""}>
+                {isBlocked ? "!" : awaitingStage?.charAt(0)}
+              </div>
+              <span class="font-medium text-sm">{isBlocked ? "Blocked" : awaitingStage}</span>
+              <span class={cn(
+                "text-[10px] px-1.5 py-0.5 rounded",
+                isBlocked ? "bg-destructive/20 text-destructive" : "bg-warning/20 text-warning"
+              )}>{isBlocked ? `${task?.loop_count}/${maxLoops} loops` : "awaiting"}</span>
+            </div>
+            <button
+              class="w-7 h-7 rounded-md flex items-center justify-center hover:bg-secondary"
+              onclick={() => (selectedBlockIdx = null)}
+            >
+              <X class="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <!-- Action content -->
+          <div class="flex-1 overflow-y-auto p-5">
+            <div class="mb-6">
+              <h3 class="text-base font-semibold mb-2">
+                {isBlocked ? "Pipeline Blocked" : "Stage Validation Required"}
+              </h3>
+              <p class="text-sm text-muted-foreground">
+                {#if isBlocked}
+                  The pipeline has looped <strong>{task?.loop_count}</strong> times without resolution.
+                {:else}
+                  The <strong>{awaitingStage}</strong> stage has completed. Review the output and decide.
+                {/if}
+              </p>
+            </div>
+
+            <div class="flex flex-col gap-3">
+              <button
+                class="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium rounded-lg bg-success text-success-foreground hover:bg-success/90 transition-colors"
+                onclick={handleApprove}
+              >
+                <CheckCircle class="w-4 h-4" /> Approve — next stage
+              </button>
+
+              <div class="relative">
+                <div class="absolute inset-0 flex items-center"><div class="w-full border-t"></div></div>
+                <div class="relative flex justify-center text-xs"><span class="bg-background px-2 text-muted-foreground">or</span></div>
+              </div>
+
+              <div class="flex flex-col gap-2">
+                <label class="text-sm font-medium">Refuse with feedback</label>
+                <textarea
+                  class="w-full px-3 py-2 text-sm rounded-lg bg-secondary border border-border resize-none"
+                  rows="3"
+                  placeholder="Explain what needs to be changed..."
+                  bind:value={refuseComment}
+                ></textarea>
+                <button
+                  class="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-destructive/15 text-destructive hover:bg-destructive/25 transition-colors disabled:opacity-50"
+                  disabled={!refuseComment.trim()}
+                  onclick={handleRefuse}
+                >
+                  <X class="w-4 h-4" /> Refuse — retry stage
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      {:else if selectedBlock}
         <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
           <!-- Detail header with tabs -->
           <div class="flex items-center justify-between px-4 py-2 border-b bg-card shrink-0">
@@ -418,5 +485,12 @@
   }
   .animate-slide-in {
     animation: slide-in 0.2s ease-out;
+  }
+  @keyframes gate-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 oklch(0.75 0.15 85 / 0.4); }
+    50% { box-shadow: 0 0 0 4px oklch(0.75 0.15 85 / 0); }
+  }
+  .animate-gate-pulse {
+    animation: gate-pulse 2s ease-in-out infinite;
   }
 </style>

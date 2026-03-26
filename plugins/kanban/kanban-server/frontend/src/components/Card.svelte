@@ -116,7 +116,7 @@
       <div class="flex flex-col gap-2 mb-3">
         {#each previewBlocks as block}
           {@const bcolor = getAgentColor(block.agent)}
-          {@const btitle = block.content.split("\n").find(l => l.trim().startsWith("#"))?.replace(/^#+\s*/, "").slice(0, 45) || block.agent}
+          {@const btitle = block.agent === "user" ? "User" : block.agent}
           <button
             class={cn(
               "w-full text-left rounded-md border border-border bg-card/50 p-2.5",

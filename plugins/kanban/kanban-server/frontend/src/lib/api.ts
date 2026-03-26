@@ -60,17 +60,6 @@ export async function gateAction(taskId: number, action: "approve" | "refuse", c
   });
 }
 
-export async function addNote(taskId: number, text: string, author?: string): Promise<void> {
-  await fetch(`/api/task/${taskId}/note`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, author }),
-  });
-}
-
-export async function deleteNote(taskId: number, noteId: number): Promise<void> {
-  await fetch(`/api/task/${taskId}/note/${noteId}`, { method: "DELETE" });
-}
 
 export async function addAttachment(taskId: number, filename: string, data: string): Promise<void> {
   await fetch(`/api/task/${taskId}/attachment`, {

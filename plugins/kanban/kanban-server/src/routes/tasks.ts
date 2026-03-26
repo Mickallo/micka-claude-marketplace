@@ -297,22 +297,41 @@ app.post("/api/task/:id/gate", async (c) => {
   const db = getDb();
 
   const task = db
-    .prepare("SELECT status, pipeline, notes FROM tasks WHERE id = ?")
-    .get(id) as { status: string; pipeline: string; notes: string | null } | undefined;
+    .prepare("SELECT status, pipeline, blocks, loop_count FROM tasks WHERE id = ?")
+    .get(id) as { status: string; pipeline: string; blocks: string | null; loop_count: number } | undefined;
   if (!task) return c.json({ error: "Not found" }, 404);
-  if (!task.status.startsWith("awaiting:")) {
-    return c.json({ error: "Task is not awaiting validation" }, 400);
-  }
 
-  const stage = task.status.slice("awaiting:".length);
   const pipeline = getPipeline(task.pipeline);
   const columns = getColumns(pipeline);
-  const stageIdx = columns.indexOf(stage);
+  const all = loadPipelines();
+
+  // Determine if task is in a gate or blocked state
+  const isAwaiting = task.status.startsWith("awaiting:");
+  const isBlocked = task.loop_count >= all.max_loops;
+  if (!isAwaiting && !isBlocked) {
+    return c.json({ error: "Task is not awaiting validation or blocked" }, 400);
+  }
+
+  const currentStage = isAwaiting ? task.status.slice("awaiting:".length) : task.status;
+  const stageIdx = columns.indexOf(currentStage);
+
+  const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
 
   if (body.action === "approve") {
     const nextStage = columns[stageIdx + 1] || "done";
-    const sets = ["status = ?", "loop_count = 0"];
-    const vals: unknown[] = [nextStage];
+
+    // Add user ok block
+    blocks.push({
+      agent: "user",
+      agent_id: null,
+      content: body.comment || "",
+      decision_log: "",
+      verdict: "ok",
+      timestamp: new Date().toISOString(),
+    });
+
+    const sets = ["status = ?", "loop_count = 0", "blocks = ?"];
+    const vals: unknown[] = [nextStage, JSON.stringify(blocks)];
     if (nextStage === "done") sets.push("completed_at = datetime('now')");
     vals.push(id);
     db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
@@ -325,86 +344,28 @@ app.post("/api/task/:id/gate", async (c) => {
     if (!comment.trim()) {
       return c.json({ error: "A comment is required when refusing" }, 400);
     }
-    const notes = task.notes ? JSON.parse(task.notes) : [];
-    notes.push({
-      id: Date.now(),
-      text: comment,
-      author: "user",
+
+    // Add user nok block
+    blocks.push({
+      agent: "user",
+      agent_id: null,
+      content: comment,
+      decision_log: "",
+      verdict: "nok",
       timestamp: new Date().toISOString(),
     });
-    db.prepare("UPDATE tasks SET status = ?, notes = ? WHERE id = ?")
-      .run(stage, JSON.stringify(notes), id);
-    eventBus.taskMoved(id, task.status, stage);
-    return c.json({ success: true, status: stage });
+
+    // Stay on same stage, reset loop_count
+    db.prepare("UPDATE tasks SET status = ?, blocks = ?, loop_count = 0 WHERE id = ?")
+      .run(currentStage, JSON.stringify(blocks), id);
+    if (task.status !== currentStage) {
+      eventBus.taskMoved(id, task.status, currentStage);
+    }
+    eventBus.taskUpdated(id);
+    return c.json({ success: true, status: currentStage });
   }
 
   return c.json({ error: "action must be 'approve' or 'refuse'" }, 400);
-});
-
-// ── Notes ────────────────────────────────────────────────
-
-app.post("/api/task/:id/note", async (c) => {
-  const id = parseInt(c.req.param("id"));
-  const body = await c.req.json();
-  const db = getDb();
-
-  const task = db
-    .prepare("SELECT blocks, notes, loop_count FROM tasks WHERE id = ?")
-    .get(id) as { blocks: string | null; notes: string | null; loop_count: number } | undefined;
-  if (!task) return c.json({ error: "Not found" }, 404);
-
-  const author = body.author || "user";
-  const text = body.text || "";
-
-  // Add as a block (unified timeline)
-  const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
-  blocks.push({
-    agent: author,
-    agent_id: null,
-    content: text,
-    decision_log: "",
-    verdict: "info",
-    timestamp: new Date().toISOString(),
-  });
-
-  // Also keep in notes for backward compat
-  const notes = task.notes ? JSON.parse(task.notes) : [];
-  const note = {
-    id: Date.now(),
-    text,
-    author,
-    timestamp: new Date().toISOString(),
-  };
-  notes.push(note);
-
-  const all = loadPipelines();
-  const isBlocked = task.loop_count >= all.max_loops;
-  const resetLoopCount = isBlocked && (author === "user" || !body.author);
-
-  if (resetLoopCount) {
-    db.prepare("UPDATE tasks SET blocks = ?, notes = ?, loop_count = 0 WHERE id = ?").run(JSON.stringify(blocks), JSON.stringify(notes), id);
-  } else {
-    db.prepare("UPDATE tasks SET blocks = ?, notes = ? WHERE id = ?").run(JSON.stringify(blocks), JSON.stringify(notes), id);
-  }
-
-  eventBus.taskUpdated(id);
-  return c.json({ success: true, note, loop_count_reset: resetLoopCount });
-});
-
-app.delete("/api/task/:id/note/:noteId", (c) => {
-  const id = parseInt(c.req.param("id"));
-  const noteId = parseInt(c.req.param("noteId"));
-  const db = getDb();
-
-  const task = db.prepare("SELECT notes FROM tasks WHERE id = ?").get(id) as { notes: string | null } | undefined;
-  if (!task) return c.json({ error: "Not found" }, 404);
-
-  const notes = task.notes ? JSON.parse(task.notes) : [];
-  const filtered = notes.filter((n: { id: number }) => n.id !== noteId);
-  db.prepare("UPDATE tasks SET notes = ? WHERE id = ?").run(JSON.stringify(filtered), id);
-
-  eventBus.taskUpdated(id);
-  return c.json({ success: true });
 });
 
 // ── Attachments ──────────────────────────────────────────

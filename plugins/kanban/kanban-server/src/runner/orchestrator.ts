@@ -36,12 +36,13 @@ function formatBlocks(blocks: Block[]): string {
     .join("\n\n");
 }
 
-function formatNotes(notes: Array<{ author: string; timestamp: string; text: string }>): string {
-  if (notes.length === 0) return "None";
-  return notes.map((n) => `- ${n.author} (${n.timestamp}): ${n.text}`).join("\n");
+function formatUserBlocks(blocks: Block[]): string {
+  const userBlocks = blocks.filter(b => b.verdict === "info");
+  if (userBlocks.length === 0) return "None";
+  return userBlocks.map((b) => `- ${b.agent} (${b.timestamp}): ${b.content}`).join("\n");
 }
 
-function buildPrompt(task: Task, blocks: Block[], notes: Array<{ author: string; timestamp: string; text: string }>): string {
+function buildPrompt(task: Task, blocks: Block[]): string {
   return `Kanban task #${task.id}
 
 Title: ${task.title}
@@ -51,7 +52,7 @@ Previous blocks:
 ${formatBlocks(blocks)}
 
 User notes:
-${formatNotes(notes)}
+${formatUserBlocks(blocks)}
 
 Respond with your output, then on the last line write one of:
 - ok — done, proceed to next stage
@@ -62,7 +63,6 @@ Respond with your output, then on the last line write one of:
 function buildResumePrompt(
   blocks: Block[],
   retryBlock: Block,
-  notes: Array<{ author: string; timestamp: string; text: string }>,
   isRelay: boolean
 ): string {
   let msg = "The task was sent back to your stage.\n\n";
@@ -71,9 +71,9 @@ function buildResumePrompt(
   }
   msg += `Feedback:\n${retryBlock.content}\n\nDecision log: ${retryBlock.decision_log}\n\n`;
 
-  const recentNotes = notes.slice(-3);
-  if (recentNotes.length > 0) {
-    msg += `User notes:\n${formatNotes(recentNotes)}\n\n`;
+  const recentUserBlocks = blocks.filter(b => b.verdict === "info").slice(-3);
+  if (recentUserBlocks.length > 0) {
+    msg += `User notes:\n${recentUserBlocks.map(b => `- ${b.agent} (${b.timestamp}): ${b.content}`).join("\n")}\n\n`;
   }
 
   msg += `Respond with your output, then on the last line write one of:
@@ -146,7 +146,6 @@ export async function runPipeline(opts: RunOptions): Promise<void> {
 
     // 4. Find repo from Resolver block (for concurrency)
     const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
-    const notes = task.notes ? JSON.parse(task.notes) : [];
     let repo = "";
     const resolverBlock = blocks.find((b) => b.agent === "Resolver" && b.verdict === "ok");
     if (resolverBlock) {
@@ -182,10 +181,10 @@ export async function runPipeline(opts: RunOptions): Promise<void> {
       let resumeId: string | undefined;
       if (isRetry && sessionId && retryBlock) {
         const isRelay = retryBlock.verdict === "relay";
-        prompt = buildResumePrompt(blocks, retryBlock, notes, isRelay);
+        prompt = buildResumePrompt(blocks, retryBlock, isRelay);
         resumeId = sessionId || undefined;
       } else {
-        prompt = buildPrompt(task, blocks, notes);
+        prompt = buildPrompt(task, blocks);
       }
 
       // 7. Dispatch via server (spawns claude with live terminal)

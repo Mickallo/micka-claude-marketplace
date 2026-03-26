@@ -53,6 +53,7 @@ export function getDb(): Database.Database {
   try { db.exec(`ALTER TABLE tasks ADD COLUMN pipeline TEXT NOT NULL DEFAULT 'full'`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE tasks ADD COLUMN blocks TEXT DEFAULT '[]'`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE tasks ADD COLUMN loop_count INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks DROP COLUMN notes`); } catch { /* already dropped or doesn't exist */ }
 
   _db = db;
   return db;

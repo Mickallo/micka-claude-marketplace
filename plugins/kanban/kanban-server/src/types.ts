@@ -19,7 +19,6 @@ export interface Task {
   loop_count: number;
   tags: string | null;
   attachments: string | null;
-  notes: string | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
@@ -47,9 +46,4 @@ export interface AgentInfo {
   prompt?: string;
 }
 
-export interface Note {
-  id: number;
-  text: string;
-  author: string;
-  timestamp: string;
-}
+
