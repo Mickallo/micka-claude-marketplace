@@ -20,6 +20,7 @@
 
   let task: Task | null = $state(null);
   let refuseComment = $state("");
+  let showRefuseInput = $state(false);
   let selectedBlockIdx: number | null = $state(null);
   let terminalBlockIdx: number | null = $state(null);
   let copied = $state<number | null>(null);
@@ -76,6 +77,8 @@
     } else {
       selectedBlockIdx = idx;
       detailTab = "content";
+      showRefuseInput = false;
+      refuseComment = "";
     }
   }
   function handleCopy(content: string) {
@@ -354,36 +357,44 @@
               </p>
             </div>
 
-            <div class="flex flex-col gap-3">
-              <button
-                class="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium rounded-lg bg-success text-success-foreground hover:bg-success/90 transition-colors"
-                onclick={handleApprove}
-              >
-                <CheckCircle class="w-4 h-4" /> Approve — next stage
-              </button>
-
-              <div class="relative">
-                <div class="absolute inset-0 flex items-center"><div class="w-full border-t"></div></div>
-                <div class="relative flex justify-center text-xs"><span class="bg-background px-2 text-muted-foreground">or</span></div>
+            {#if !showRefuseInput}
+              <div class="flex items-center gap-2">
+                <button
+                  class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-success text-success-foreground hover:bg-success/90 transition-colors"
+                  onclick={handleApprove}
+                >
+                  <CheckCircle class="w-4 h-4" /> Approve
+                </button>
+                <button
+                  class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-destructive/15 text-destructive hover:bg-destructive/25 transition-colors"
+                  onclick={() => (showRefuseInput = true)}
+                >
+                  <X class="w-4 h-4" /> Refuse...
+                </button>
               </div>
-
+            {:else}
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium">Refuse with feedback</label>
                 <textarea
                   class="w-full px-3 py-2 text-sm rounded-lg bg-secondary border border-border resize-none"
                   rows="3"
                   placeholder="Explain what needs to be changed..."
                   bind:value={refuseComment}
                 ></textarea>
-                <button
-                  class="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-destructive/15 text-destructive hover:bg-destructive/25 transition-colors disabled:opacity-50"
-                  disabled={!refuseComment.trim()}
-                  onclick={handleRefuse}
-                >
-                  <X class="w-4 h-4" /> Refuse — retry stage
-                </button>
+                <div class="flex items-center gap-2">
+                  <button
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-secondary transition-colors"
+                    onclick={() => { showRefuseInput = false; refuseComment = ""; }}
+                  >Cancel</button>
+                  <button
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-destructive/15 text-destructive hover:bg-destructive/25 transition-colors disabled:opacity-50"
+                    disabled={!refuseComment.trim()}
+                    onclick={handleRefuse}
+                  >
+                    <X class="w-3.5 h-3.5" /> Refuse — retry stage
+                  </button>
+                </div>
               </div>
-            </div>
+            {/if}
           </div>
         </div>
       {:else if selectedBlock}
