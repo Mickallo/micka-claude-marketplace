@@ -22,8 +22,8 @@
   const defaultStages = ["Resolver", "Planner", "Critic", "Builder", "Inspector", "Ranger"];
   let completedStages = $derived(new Set(blocks.map(b => b.agent)));
 
-  // Last 3 finished blocks for preview (exclude running)
-  let previewBlocks = $derived(blocks.filter(b => b.verdict !== "running").slice(-3));
+  // Last 3 agent blocks for preview (exclude running and user info blocks)
+  let previewBlocks = $derived(blocks.filter(b => b.verdict !== "running" && b.verdict !== "info").slice(-3));
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->

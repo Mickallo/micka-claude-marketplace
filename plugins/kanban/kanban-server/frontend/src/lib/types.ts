@@ -3,7 +3,7 @@ export interface Block {
   agent_id: string | null;
   content: string;
   decision_log: string;
-  verdict: "ok" | "nok" | "relay" | "running";
+  verdict: "ok" | "nok" | "relay" | "running" | "info";
   timestamp: string;
 }
 

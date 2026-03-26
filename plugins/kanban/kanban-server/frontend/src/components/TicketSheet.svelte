@@ -243,28 +243,43 @@
           {#each blocks as block, idx}
             {@const bcolor = getAgentColor(block.agent)}
             {@const isRunning = block.verdict === "running"}
+            {@const isUser = block.verdict === "info"}
             <div
-              class={cn("rounded-lg border bg-card overflow-hidden border-l-4", isRunning && "border-primary/50 shadow-lg shadow-primary/5")}
-              style="border-left-color: {bcolor}"
+              class={cn(
+                "rounded-lg border bg-card overflow-hidden border-l-4",
+                isRunning && "border-primary/50 shadow-lg shadow-primary/5",
+                isUser && "border-l-muted-foreground/30"
+              )}
+              style={!isUser ? `border-left-color: ${bcolor}` : ""}
             >
               <!-- Block header -->
               <button
                 class={cn("w-full flex items-center gap-3 p-3 hover:bg-secondary/30 transition-colors text-left", isRunning && "animate-pulse")}
                 onclick={() => isRunning ? null : toggleBlock(idx)}
               >
-                <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white text-xs font-bold" style="background: {bcolor}">
-                  {#if isRunning}
-                    <Loader2 class="w-4 h-4 animate-spin" />
-                  {:else}
-                    {block.agent.charAt(0)}
-                  {/if}
-                </div>
+                {#if isUser}
+                  <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-muted text-muted-foreground text-xs font-bold">
+                    {block.agent === "user" ? "U" : block.agent.charAt(0).toUpperCase()}
+                  </div>
+                {:else}
+                  <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white text-xs font-bold" style="background: {bcolor}">
+                    {#if isRunning}
+                      <Loader2 class="w-4 h-4 animate-spin" />
+                    {:else}
+                      {block.agent.charAt(0)}
+                    {/if}
+                  </div>
+                {/if}
 
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">
-                    <span class="font-medium text-sm truncate">{block.agent}</span>
+                    <span class="font-medium text-sm truncate">
+                      {isUser ? (block.agent === "user" ? "User" : block.agent) : block.agent}
+                    </span>
                     {#if isRunning}
                       <span class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">running</span>
+                    {:else if isUser}
+                      <!-- no verdict badge for user blocks -->
                     {:else}
                       <span class={cn(
                         "text-[10px] px-1.5 py-0.5 rounded",
@@ -304,7 +319,7 @@
                           <Copy class="w-3 h-3" /> Copy
                         {/if}
                       </button>
-                      {#if block.agent_id && !isRunning && !block.agent_id.startsWith("term_")}
+                      {#if block.agent_id && !isRunning && !isUser && !block.agent_id.startsWith("term_") && !hasRunningBlock && (task?.status === "done" || task?.status === "todo" || task?.status.startsWith("awaiting:"))}
                         <button
                           class="inline-flex items-center gap-1 h-6 px-2 text-xs rounded bg-secondary/80 hover:bg-secondary border border-border"
                           onclick={() => (terminalBlockIdx = terminalBlockIdx === idx ? null : idx)}
@@ -331,21 +346,7 @@
           {/each}
         {/if}
 
-        <!-- Notes -->
-        {#if notes.length > 0}
-          <div class="mt-4 pt-4 border-t">
-            <h4 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Notes ({notes.length})</h4>
-            {#each notes as n}
-              <div class="bg-secondary/30 rounded-md p-3 mb-2 text-sm">
-                <div class="flex items-center gap-2 mb-1 text-xs text-muted-foreground">
-                  <span class="font-medium text-foreground">{n.author || "user"}</span>
-                  <span>{formatDistanceToNow(n.timestamp)}</span>
-                </div>
-                <div>{@html md(n.text || "")}</div>
-              </div>
-            {/each}
-          </div>
-        {/if}
+        <!-- Notes are now in blocks (verdict: "info") — no separate section needed -->
       </div>
     </div>
 

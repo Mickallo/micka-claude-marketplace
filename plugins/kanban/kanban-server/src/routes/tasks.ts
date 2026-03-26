@@ -31,12 +31,25 @@ app.post("/api/task", async (c) => {
     .get(pipelineName) as { maxRank: number | null } | undefined;
   const rank = (maxRankRow?.maxRank ?? 0) + 1000;
 
+  // Build initial blocks: description becomes first user block
+  const initialBlocks: Block[] = [];
+  if (description) {
+    initialBlocks.push({
+      agent: "user",
+      agent_id: null,
+      content: description,
+      decision_log: "",
+      verdict: "info",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   const result = db
     .prepare(
-      `INSERT INTO tasks (title, priority, pipeline, description, tags, rank)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (title, priority, pipeline, description, tags, rank, blocks)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(title, priority, pipelineName, description, tags, rank);
+    .run(title, priority, pipelineName, description, tags, rank, JSON.stringify(initialBlocks));
 
   const id = result.lastInsertRowid as number;
   eventBus.taskUpdated(id);
@@ -336,27 +349,42 @@ app.post("/api/task/:id/note", async (c) => {
   const db = getDb();
 
   const task = db
-    .prepare("SELECT notes, loop_count FROM tasks WHERE id = ?")
-    .get(id) as { notes: string | null; loop_count: number } | undefined;
+    .prepare("SELECT blocks, notes, loop_count FROM tasks WHERE id = ?")
+    .get(id) as { blocks: string | null; notes: string | null; loop_count: number } | undefined;
   if (!task) return c.json({ error: "Not found" }, 404);
 
+  const author = body.author || "user";
+  const text = body.text || "";
+
+  // Add as a block (unified timeline)
+  const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
+  blocks.push({
+    agent: author,
+    agent_id: null,
+    content: text,
+    decision_log: "",
+    verdict: "info",
+    timestamp: new Date().toISOString(),
+  });
+
+  // Also keep in notes for backward compat
   const notes = task.notes ? JSON.parse(task.notes) : [];
   const note = {
     id: Date.now(),
-    text: body.text || "",
-    author: body.author || "user",
+    text,
+    author,
     timestamp: new Date().toISOString(),
   };
   notes.push(note);
 
   const all = loadPipelines();
   const isBlocked = task.loop_count >= all.max_loops;
-  const resetLoopCount = isBlocked && (body.author === "user" || !body.author);
+  const resetLoopCount = isBlocked && (author === "user" || !body.author);
 
   if (resetLoopCount) {
-    db.prepare("UPDATE tasks SET notes = ?, loop_count = 0 WHERE id = ?").run(JSON.stringify(notes), id);
+    db.prepare("UPDATE tasks SET blocks = ?, notes = ?, loop_count = 0 WHERE id = ?").run(JSON.stringify(blocks), JSON.stringify(notes), id);
   } else {
-    db.prepare("UPDATE tasks SET notes = ? WHERE id = ?").run(JSON.stringify(notes), id);
+    db.prepare("UPDATE tasks SET blocks = ?, notes = ? WHERE id = ?").run(JSON.stringify(blocks), JSON.stringify(notes), id);
   }
 
   eventBus.taskUpdated(id);
@@ -474,13 +502,13 @@ app.post("/api/task/:id/dispatch", async (c) => {
 
   if (!prompt || !agent) return c.json({ error: "prompt and agent required" }, 400);
 
-  // Use -p with --output-format json to get session_id back
-  // Terminal resume (interactive) happens when user clicks on a finished block
+  // Use --agent to leverage the agent's prompt, model, and tools from agents/*.md
+  // -p sends the task context as the initial message
   const args: string[] = [];
   if (resume) {
     args.push("--resume", resume, "-p", prompt);
   } else {
-    args.push("-p", prompt);
+    args.push("--agent", `kanban:${agent}`, "-p", prompt);
   }
   args.push("--output-format", "json");
 

@@ -16,7 +16,7 @@ tools:
 
 ## Role
 
-Identify which repository is concerned by a task using the rchiv-registry on GitHub, then ensure the repo is available locally.
+Identify which repository is concerned by a task using the rchiv-registry, then ensure the repo is available locally.
 
 ## Forbidden
 
@@ -30,21 +30,33 @@ The orchestrator provides: task ID, title, description, previous blocks, user no
 
 ## Procedure
 
-1. **Fetch the service index** from the registry:
+1. **Ensure the registry is available locally**:
    ```bash
-   gh api "repos/Evaneos/rchiv-registry/contents/services.json" --jq '.content'
+   ls ~/Projects/rchiv-registry/.git
    ```
-   Decode the base64 output to get the JSON map of service names to rchiv paths.
-
-2. **Fetch semantic metadata** for each service to find the best match. For each service in the index, fetch its `.rchiv.json` from the `services/` directory:
+   If not present, clone it:
    ```bash
-   gh api "repos/Evaneos/rchiv-registry/contents/services/<name>.rchiv.json" --jq '.content'
+   gh repo clone Evaneos/rchiv-registry ~/Projects/rchiv-registry
    ```
-   Decode and extract `semantic.purpose`, `semantic.summary`, `semantic.tags`, and `_meta.repo`.
+   If present, pull latest:
+   ```bash
+   git -C ~/Projects/rchiv-registry pull --ff-only
+   ```
 
-3. **Match the task** to the right service(s) by comparing the task title and description against each service's `purpose`, `summary`, and `tags`. Consider also `connections` to identify related services if the task spans multiple services.
+2. **Read the service index** from the local registry:
+   ```bash
+   cat ~/Projects/rchiv-registry/services.json
+   ```
 
-4. **Ensure the repo is available locally**. Check if the repo exists at `~/Projects/<name>`:
+3. **Read semantic metadata** for each service from the local `services/` directory:
+   ```bash
+   cat ~/Projects/rchiv-registry/services/<name>.rchiv.json
+   ```
+   Extract `semantic.purpose`, `semantic.summary`, `semantic.tags`, and `_meta.repo`.
+
+4. **Match the task** to the right service(s) by comparing the task title and description against each service's `purpose`, `summary`, and `tags`. Consider also `connections` to identify related services if the task spans multiple services.
+
+5. **Ensure the repo is available locally**. Check if the repo exists at `~/Projects/<name>`:
    ```bash
    ls ~/Projects/<name>/.git
    ```
@@ -57,7 +69,7 @@ The orchestrator provides: task ID, title, description, previous blocks, user no
    git -C ~/Projects/<name> pull --ff-only
    ```
 
-5. **Gather working context** from the cloned repo: detect build tools, test commands, working directories.
+6. **Gather working context** from the cloned repo: detect build tools, test commands, working directories.
 
 ## Output
 
