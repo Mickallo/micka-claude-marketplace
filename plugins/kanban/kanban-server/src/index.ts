@@ -1,3 +1,7 @@
+// Prevent uncaught errors from crashing the server
+process.on("uncaughtException", (err) => console.error("Uncaught:", err.message));
+process.on("unhandledRejection", (err) => console.error("Unhandled:", err));
+
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import fs from "fs";

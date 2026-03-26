@@ -22,8 +22,8 @@
   const defaultStages = ["Resolver", "Planner", "Critic", "Builder", "Inspector", "Ranger"];
   let completedStages = $derived(new Set(blocks.map(b => b.agent)));
 
-  // Last 3 blocks for preview
-  let previewBlocks = $derived(blocks.slice(-3));
+  // Last 3 finished blocks for preview (exclude running)
+  let previewBlocks = $derived(blocks.filter(b => b.verdict !== "running").slice(-3));
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -154,9 +154,6 @@
             <Loader2 class="w-3.5 h-3.5 text-white animate-spin" />
           </div>
           <span class="text-xs font-medium flex-1">{runningBlock.agent} running...</span>
-          {#if runningBlock.agent_id}
-            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary">Terminal</span>
-          {/if}
         </div>
       </div>
     {/if}

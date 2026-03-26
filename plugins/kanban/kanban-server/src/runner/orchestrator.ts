@@ -193,7 +193,6 @@ export async function runPipeline(opts: RunOptions): Promise<void> {
         agent: currentStage,
         prompt,
         resume: resumeId,
-        cwd: repo || undefined,
       });
 
       const terminalId = (dispatchResult as { terminalId?: string }).terminalId;

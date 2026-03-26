@@ -210,23 +210,18 @@
     <!-- Terminal (if open) -->
     {#if terminalBlockIdx !== null && blocks[terminalBlockIdx]?.agent_id}
       {@const termBlock = blocks[terminalBlockIdx]}
-      {@const isLiveTerminal = termBlock.agent_id?.startsWith("term_")}
       <div class="border-b bg-card shrink-0">
         <div class="flex items-center justify-between px-4 py-2 border-b">
           <span class="text-xs font-medium">
             {termBlock.agent} Terminal
-            {#if isLiveTerminal}
+            {#if termBlock.verdict === "running"}
               <span class="text-primary ml-1">(live)</span>
             {/if}
           </span>
           <button class="text-xs text-muted-foreground hover:text-foreground" onclick={() => (terminalBlockIdx = null)}>Close</button>
         </div>
         <div class="h-[300px]">
-          {#if isLiveTerminal}
-            <TerminalView terminalId={termBlock.agent_id} />
-          {:else}
-            <TerminalView sessionId={termBlock.agent_id} />
-          {/if}
+          <TerminalView id={termBlock.agent_id} />
         </div>
       </div>
     {/if}
@@ -255,7 +250,7 @@
               <!-- Block header -->
               <button
                 class={cn("w-full flex items-center gap-3 p-3 hover:bg-secondary/30 transition-colors text-left", isRunning && "animate-pulse")}
-                onclick={() => isRunning ? (block.agent_id ? (terminalBlockIdx = idx) : null) : toggleBlock(idx)}
+                onclick={() => isRunning ? null : toggleBlock(idx)}
               >
                 <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white text-xs font-bold" style="background: {bcolor}">
                   {#if isRunning}
@@ -282,10 +277,8 @@
 
                 <div class="flex items-center gap-1 shrink-0">
                   {#if isRunning}
-                    <span class="text-xs text-primary font-medium">
-                      {block.agent_id ? "Open Terminal" : "Waiting..."}
-                    </span>
-                  {:else if !isRunning}
+                    <Loader2 class="w-4 h-4 text-primary animate-spin" />
+                  {:else}
                     {#if expandedBlocks.has(idx)}
                       <ChevronDown class="w-4 h-4 text-muted-foreground" />
                     {:else}
@@ -311,12 +304,12 @@
                           <Copy class="w-3 h-3" /> Copy
                         {/if}
                       </button>
-                      {#if block.agent_id}
+                      {#if block.agent_id && !isRunning && !block.agent_id.startsWith("term_")}
                         <button
                           class="inline-flex items-center gap-1 h-6 px-2 text-xs rounded bg-secondary/80 hover:bg-secondary border border-border"
                           onclick={() => (terminalBlockIdx = terminalBlockIdx === idx ? null : idx)}
                         >
-                          <TerminalIcon class="w-3 h-3" /> Terminal
+                          <TerminalIcon class="w-3 h-3" /> Resume
                         </button>
                       {/if}
                     </div>

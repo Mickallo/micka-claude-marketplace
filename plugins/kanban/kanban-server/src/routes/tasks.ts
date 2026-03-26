@@ -471,40 +471,71 @@ app.post("/api/task/:id/dispatch", async (c) => {
   const prompt = body.prompt as string;
   const agent = body.agent as string;
   const resume = body.resume as string | undefined;
-  const cwd = body.cwd as string | undefined;
 
   if (!prompt || !agent) return c.json({ error: "prompt and agent required" }, 400);
 
-  // No --output-format json: we want streaming text for the live terminal
+  // Use -p with --output-format json to get session_id back
+  // Terminal resume (interactive) happens when user clicks on a finished block
   const args: string[] = [];
   if (resume) {
     args.push("--resume", resume, "-p", prompt);
   } else {
     args.push("-p", prompt);
   }
+  args.push("--output-format", "json");
 
   const { terminalId } = spawnAgent({
     args,
-    cwd,
+    interactive: false,  // child_process for clean JSON output
     onFinish: (output, exitCode) => {
-      // Strip ANSI escape codes for parsing
-      const clean = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\r/g, "");
+      // Strip ANSI escape codes and control chars
+      const clean = output
+        .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+        .replace(/\x1b\][^\x07]*\x07/g, "")
+        .replace(/\x1b[><=][^\n]*/g, "")
+        .replace(/\x1b\[\?[0-9;]*[a-zA-Z]/g, "")
+        .replace(/\r/g, "")
+        .trim();
+
+      // Try to extract JSON from output (--output-format json wraps in {"type":"result",...})
+      let sessionId: string | null = null;
+      let parsedText = clean;
+      const jsonMatch = clean.match(/\{["\s]*type["\s]*:["\s]*result[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const json = JSON.parse(jsonMatch[0]);
+          sessionId = json.session_id || null;
+          parsedText = json.result || json.text || clean;
+        } catch {
+          // JSON parse failed — try line by line
+          for (const line of clean.split("\n")) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("{") && trimmed.includes("session_id")) {
+              try {
+                const json = JSON.parse(trimmed);
+                sessionId = json.session_id || null;
+                parsedText = json.result || json.text || clean;
+              } catch {}
+            }
+          }
+        }
+      }
 
       // Parse verdict
-      const verdictMatch = clean.match(/## Verdict\s*\n\s*(ok|nok|relay)/i);
-      const lines = clean.trim().split("\n").filter(l => l.trim());
+      const verdictMatch = parsedText.match(/## Verdict\s*\n\s*(ok|nok|relay)/i);
+      const lines = parsedText.trim().split("\n").filter((l: string) => l.trim());
       const lastLine = lines[lines.length - 1]?.trim().toLowerCase();
       const verdict = verdictMatch ? verdictMatch[1] as "ok" | "nok" | "relay" :
         (lastLine === "ok" || lastLine === "nok" || lastLine === "relay") ? lastLine as "ok" | "nok" | "relay" :
         exitCode === 0 ? "ok" : "nok";
 
       // Parse content/decision_log
-      const contentMatch = clean.match(/## Content\s*\n([\s\S]*?)(?=\n## Decision Log|\n## Verdict|$)/);
-      const decisionMatch = clean.match(/## Decision Log\s*\n([\s\S]*?)(?=\n## Verdict|$)/);
-      const content = contentMatch ? contentMatch[1].trim() : clean.slice(0, 5000);
+      const contentMatch = parsedText.match(/## Content\s*\n([\s\S]*?)(?=\n## Decision Log|\n## Verdict|$)/);
+      const decisionMatch = parsedText.match(/## Decision Log\s*\n([\s\S]*?)(?=\n## Verdict|$)/);
+      const content = contentMatch ? contentMatch[1].trim() : parsedText.slice(0, 5000);
       const decisionLog = decisionMatch ? decisionMatch[1].trim() : "";
 
-      // Update the running block
+      // Update the running block with session_id for resume
       const taskNow = db.prepare("SELECT blocks FROM tasks WHERE id = ?").get(id) as { blocks: string | null } | undefined;
       if (taskNow) {
         const blocks: Block[] = taskNow.blocks ? JSON.parse(taskNow.blocks) : [];
@@ -513,7 +544,7 @@ app.post("/api/task/:id/dispatch", async (c) => {
           lastBlock.content = content;
           lastBlock.decision_log = decisionLog;
           lastBlock.verdict = verdict;
-          // Keep terminalId as agent_id for terminal replay
+          lastBlock.agent_id = sessionId; // Real session_id for resume
           db.prepare("UPDATE tasks SET blocks = ? WHERE id = ?").run(JSON.stringify(blocks), id);
           eventBus.blockAdded(id, lastBlock.agent, lastBlock.verdict);
         }
