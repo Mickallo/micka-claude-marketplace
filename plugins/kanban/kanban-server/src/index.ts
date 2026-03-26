@@ -92,4 +92,8 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 });
 
 // Attach WebSocket terminal handler
-setupTerminalWS(server as unknown as import("http").Server);
+const httpServer = server as unknown as import("http").Server;
+httpServer.on("upgrade", (req) => {
+  console.log(`[upgrade] ${req.url}`);
+});
+setupTerminalWS(httpServer);

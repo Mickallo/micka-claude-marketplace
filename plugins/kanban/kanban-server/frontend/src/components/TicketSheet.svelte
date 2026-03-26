@@ -209,13 +209,24 @@
 
     <!-- Terminal (if open) -->
     {#if terminalBlockIdx !== null && blocks[terminalBlockIdx]?.agent_id}
+      {@const termBlock = blocks[terminalBlockIdx]}
+      {@const isLiveTerminal = termBlock.agent_id?.startsWith("term_")}
       <div class="border-b bg-card shrink-0">
         <div class="flex items-center justify-between px-4 py-2 border-b">
-          <span class="text-xs font-medium">{blocks[terminalBlockIdx].agent} Terminal</span>
+          <span class="text-xs font-medium">
+            {termBlock.agent} Terminal
+            {#if isLiveTerminal}
+              <span class="text-primary ml-1">(live)</span>
+            {/if}
+          </span>
           <button class="text-xs text-muted-foreground hover:text-foreground" onclick={() => (terminalBlockIdx = null)}>Close</button>
         </div>
         <div class="h-[300px]">
-          <TerminalView sessionId={blocks[terminalBlockIdx].agent_id} />
+          {#if isLiveTerminal}
+            <TerminalView terminalId={termBlock.agent_id} />
+          {:else}
+            <TerminalView sessionId={termBlock.agent_id} />
+          {/if}
         </div>
       </div>
     {/if}
@@ -271,11 +282,9 @@
 
                 <div class="flex items-center gap-1 shrink-0">
                   {#if isRunning}
-                    {#if block.agent_id}
-                      <span class="text-xs text-primary font-medium">Open Terminal</span>
-                    {:else}
-                      <span class="text-xs text-muted-foreground">Waiting...</span>
-                    {/if}
+                    <span class="text-xs text-primary font-medium">
+                      {block.agent_id ? "Open Terminal" : "Waiting..."}
+                    </span>
                   {:else if !isRunning}
                     {#if expandedBlocks.has(idx)}
                       <ChevronDown class="w-4 h-4 text-muted-foreground" />

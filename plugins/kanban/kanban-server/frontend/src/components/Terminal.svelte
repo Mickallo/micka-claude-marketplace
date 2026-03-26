@@ -5,7 +5,9 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import "@xterm/xterm/css/xterm.css";
 
-  let { sessionId }: { sessionId: string | null } = $props();
+  let { sessionId, terminalId }: { sessionId?: string | null; terminalId?: string | null } = $props();
+
+  let activeId = $derived(terminalId || sessionId);
 
   let terminalEl: HTMLDivElement;
   let terminal: Terminal | null = null;
@@ -77,10 +79,12 @@
       terminal.clear();
     }
 
-    terminal.writeln(`\x1b[90mConnecting to session ${sid}...\x1b[0m\r\n`);
+    const isLive = sid.startsWith("term_");
+    terminal.writeln(`\x1b[90m${isLive ? "Connecting to live terminal" : "Resuming session"} ${sid}...\x1b[0m\r\n`);
 
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    ws = new WebSocket(`${protocol}//${location.host}/api/terminal/ws?session=${encodeURIComponent(sid)}`);
+    const param = isLive ? `terminal=${encodeURIComponent(sid)}` : `session=${encodeURIComponent(sid)}`;
+    ws = new WebSocket(`${protocol}//${location.host}/api/terminal/ws?${param}`);
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
@@ -133,9 +137,8 @@
   }
 
   $effect(() => {
-    if (sessionId) {
-      // Wait for DOM mount
-      if (terminalEl) connect(sessionId);
+    if (activeId) {
+      if (terminalEl) connect(activeId);
     } else {
       disconnect();
       if (terminal) {

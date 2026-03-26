@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
+import { spawnAgent } from "../terminal.js";
 import { getDb, renumberRanks, IMAGES_DIR } from "../db.js";
 import { getPipeline, getColumns, getTransitions, loadPipelines } from "../pipelines.js";
 import { eventBus } from "../events.js";
@@ -455,6 +456,85 @@ app.get("/api/uploads/:filename", (c) => {
       "Cache-Control": "public, max-age=86400",
     },
   });
+});
+
+// ── Dispatch agent (spawn claude with live terminal) ─────
+
+app.post("/api/task/:id/dispatch", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  const body = await c.req.json();
+  const db = getDb();
+
+  const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Task | undefined;
+  if (!task) return c.json({ error: "Not found" }, 404);
+
+  const prompt = body.prompt as string;
+  const agent = body.agent as string;
+  const resume = body.resume as string | undefined;
+  const cwd = body.cwd as string | undefined;
+
+  if (!prompt || !agent) return c.json({ error: "prompt and agent required" }, 400);
+
+  // No --output-format json: we want streaming text for the live terminal
+  const args: string[] = [];
+  if (resume) {
+    args.push("--resume", resume, "-p", prompt);
+  } else {
+    args.push("-p", prompt);
+  }
+
+  const { terminalId } = spawnAgent({
+    args,
+    cwd,
+    onFinish: (output, exitCode) => {
+      // Strip ANSI escape codes for parsing
+      const clean = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\r/g, "");
+
+      // Parse verdict
+      const verdictMatch = clean.match(/## Verdict\s*\n\s*(ok|nok|relay)/i);
+      const lines = clean.trim().split("\n").filter(l => l.trim());
+      const lastLine = lines[lines.length - 1]?.trim().toLowerCase();
+      const verdict = verdictMatch ? verdictMatch[1] as "ok" | "nok" | "relay" :
+        (lastLine === "ok" || lastLine === "nok" || lastLine === "relay") ? lastLine as "ok" | "nok" | "relay" :
+        exitCode === 0 ? "ok" : "nok";
+
+      // Parse content/decision_log
+      const contentMatch = clean.match(/## Content\s*\n([\s\S]*?)(?=\n## Decision Log|\n## Verdict|$)/);
+      const decisionMatch = clean.match(/## Decision Log\s*\n([\s\S]*?)(?=\n## Verdict|$)/);
+      const content = contentMatch ? contentMatch[1].trim() : clean.slice(0, 5000);
+      const decisionLog = decisionMatch ? decisionMatch[1].trim() : "";
+
+      // Update the running block
+      const taskNow = db.prepare("SELECT blocks FROM tasks WHERE id = ?").get(id) as { blocks: string | null } | undefined;
+      if (taskNow) {
+        const blocks: Block[] = taskNow.blocks ? JSON.parse(taskNow.blocks) : [];
+        const lastBlock = blocks[blocks.length - 1];
+        if (lastBlock && lastBlock.verdict === "running") {
+          lastBlock.content = content;
+          lastBlock.decision_log = decisionLog;
+          lastBlock.verdict = verdict;
+          // Keep terminalId as agent_id for terminal replay
+          db.prepare("UPDATE tasks SET blocks = ? WHERE id = ?").run(JSON.stringify(blocks), id);
+          eventBus.blockAdded(id, lastBlock.agent, lastBlock.verdict);
+        }
+      }
+    },
+  });
+
+  // Write the running block with terminalId
+  const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
+  blocks.push({
+    agent,
+    agent_id: terminalId,  // Use terminalId so frontend can connect
+    content: `Running ${agent}...`,
+    decision_log: "",
+    verdict: "running",
+    timestamp: new Date().toISOString(),
+  });
+  db.prepare("UPDATE tasks SET blocks = ? WHERE id = ?").run(JSON.stringify(blocks), id);
+  eventBus.blockAdded(id, agent, "running");
+
+  return c.json({ success: true, terminalId });
 });
 
 // ── Run pipeline ─────────────────────────────────────────

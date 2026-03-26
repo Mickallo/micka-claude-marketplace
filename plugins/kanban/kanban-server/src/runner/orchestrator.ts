@@ -177,46 +177,41 @@ export async function runPipeline(opts: RunOptions): Promise<void> {
         }
       }
 
-      // 6. Write a "running" block so the UI can show it live
-      await apiPost(`/api/task/${taskId}/block`, {
-        agent: currentStage,
-        agent_id: null,
-        content: `Running ${currentStage}...`,
-        decision_log: "",
-        verdict: "running",
-      });
-
-      // 7. Spawn or resume claude
-      let result;
+      // 6. Build prompt
+      let prompt: string;
+      let resumeId: string | undefined;
       if (isRetry && sessionId && retryBlock) {
         const isRelay = retryBlock.verdict === "relay";
-        const prompt = buildResumePrompt(blocks, retryBlock, notes, isRelay);
-        result = await spawnClaude({
-          resume: sessionId,
-          prompt,
-          cwd: repo || undefined,
-        });
+        prompt = buildResumePrompt(blocks, retryBlock, notes, isRelay);
+        resumeId = sessionId || undefined;
       } else {
-        const prompt = buildPrompt(task, blocks, notes);
-        result = await spawnClaude({
-          prompt,
-          model: undefined,
-          cwd: repo || undefined,
-        });
+        prompt = buildPrompt(task, blocks, notes);
       }
 
-      // 8. Parse verdict and update the running block
-      const parsed = parseAgentOutput(result.output);
-      const capturedSessionId = result.sessionId;
-
-      onLog(`Task #${taskId}: ${currentStage} -> ${parsed.verdict}`);
-
-      await apiPatch(`/api/task/${taskId}/block`, {
-        agent_id: capturedSessionId,
-        content: parsed.content,
-        decision_log: parsed.decision_log,
-        verdict: parsed.verdict,
+      // 7. Dispatch via server (spawns claude with live terminal)
+      const dispatchResult = await apiPost(`/api/task/${taskId}/dispatch`, {
+        agent: currentStage,
+        prompt,
+        resume: resumeId,
+        cwd: repo || undefined,
       });
+
+      const terminalId = (dispatchResult as { terminalId?: string }).terminalId;
+      onLog(`Task #${taskId}: ${currentStage} dispatched (terminal: ${terminalId})`);
+
+      // 8. Poll until the running block is updated by the server
+      let parsed = { verdict: "ok" as string };
+      for (let i = 0; i < 600; i++) {  // max 10 minutes
+        await new Promise((r) => setTimeout(r, 3000));
+        const updatedTask: Task = await api(`/api/task/${taskId}`);
+        const updatedBlocks: Block[] = updatedTask.blocks ? JSON.parse(updatedTask.blocks) : [];
+        const lastBlock = updatedBlocks[updatedBlocks.length - 1];
+        if (lastBlock && lastBlock.verdict !== "running") {
+          parsed.verdict = lastBlock.verdict;
+          onLog(`Task #${taskId}: ${currentStage} -> ${lastBlock.verdict}`);
+          break;
+        }
+      }
 
       // 9. Move task
       if (parsed.verdict === "ok") {
