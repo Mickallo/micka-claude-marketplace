@@ -1,11 +1,18 @@
-export function priorityClass(p: string): string {
-  return p === "high" || p === "medium" || p === "low" ? p : "";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+	return twMerge(clsx(inputs));
 }
 
-export function isOlderThan3Days(d: string): boolean {
-  return d ? Date.now() - new Date(d).getTime() > 3 * 86400000 : false;
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type WithoutChild<T> = T extends { child?: any } ? Omit<T, "child"> : T;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type WithoutChildren<T> = T extends { children?: any } ? Omit<T, "children"> : T;
+export type WithoutChildrenOrChild<T> = WithoutChildren<WithoutChild<T>>;
+export type WithElementRef<T, U extends HTMLElement = HTMLElement> = T & { ref?: U | null };
 
+// App utilities
 export function parseTags(tags: string | null): string[] {
   if (!tags || tags === "null") return [];
   try { const p = JSON.parse(tags); return Array.isArray(p) ? p : []; } catch { return []; }

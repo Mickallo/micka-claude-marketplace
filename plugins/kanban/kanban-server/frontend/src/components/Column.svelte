@@ -1,103 +1,104 @@
 <script lang="ts">
-  import { flip } from "svelte/animate";
-  import { fly } from "svelte/transition";
   import Card from "./Card.svelte";
+  import { cn } from "../lib/cn";
+  import { getAgentColor } from "../lib/agents";
   import type { Task } from "../lib/types";
-  import { isOlderThan3Days } from "../lib/utils";
 
-  let { columnKey, tasks, maxLoops, searchQuery, hideOldDone, currentSort, onselect, onadd, ondragstart, ondrop }: {
+  let { columnKey, tasks, maxLoops, description, onselect, onadd, ondragstart, ondrop }: {
     columnKey: string;
     tasks: Task[];
     maxLoops: number;
-    searchQuery: string;
-    hideOldDone: boolean;
-    currentSort: string;
+    description?: string;
     onselect: (id: number) => void;
     onadd?: () => void;
     ondragstart: (e: DragEvent, id: number) => void;
     ondrop: (e: DragEvent, column: string) => void;
   } = $props();
 
-  let label = $derived(
-    columnKey === "todo" ? "Todo" : columnKey === "done" ? "Done" : columnKey
-  );
-
-  let sortedTasks = $derived.by(() => {
-    if (currentSort === "default") return tasks;
-    return [...tasks].sort((a, b) => {
-      if (currentSort === "created_asc") return a.created_at.localeCompare(b.created_at);
-      if (currentSort === "created_desc") return b.created_at.localeCompare(a.created_at);
-      if (currentSort === "completed_desc") return (b.completed_at || "").localeCompare(a.completed_at || "");
-      return 0;
-    });
-  });
-
-  let filteredTasks = $derived.by(() => {
-    const q = searchQuery.toLowerCase().replace(/^#/, "");
-    return sortedTasks.filter((t) => {
-      if (hideOldDone && t.status === "done" && isOlderThan3Days(t.completed_at || "")) return false;
-      if (!q) return true;
-      const id = String(t.id);
-      return id === q || t.title.toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q);
-    });
-  });
-
+  let color = $derived(getAgentColor(columnKey));
+  let awaitingCount = $derived(tasks.filter(t => t.status.startsWith("awaiting:")).length);
+  let processingCount = $derived(tasks.filter(t => !t.status.startsWith("awaiting:") && t.status !== "todo" && t.status !== "done").length);
   let dragOver = $state(false);
-
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault();
-    dragOver = true;
-  }
-
-  function handleDragLeave(e: DragEvent) {
-    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
-      dragOver = false;
-    }
-  }
-
-  function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    dragOver = false;
-    ondrop(e, columnKey);
-  }
+  let label = $derived(columnKey === "todo" ? "Queue" : columnKey === "done" ? "Done" : columnKey);
 </script>
 
-<div class="column {columnKey}">
-  <div class="column-header">
-    <span>{label}</span>
-    <div class="column-header-right">
-      {#if onadd}
-        <button class="add-card-btn" title="Add card" onclick={onadd}>+</button>
-      {/if}
-      <span class="count">
-        {#if filteredTasks.length !== tasks.length}
-          {filteredTasks.length}/{tasks.length}
-        {:else}
+<div class={cn("flex flex-col min-w-[320px] w-[320px] rounded-lg border bg-card", "transition-all duration-200")}>
+  <!-- Column Header — v0 style -->
+  <div
+    class="flex items-center gap-3 px-4 py-5 border-b"
+    style={color ? `background: linear-gradient(to right, transparent, color-mix(in oklch, ${color} 10%, transparent))` : ""}
+  >
+    <!-- Agent icon circle -->
+    <div
+      class="flex items-center justify-center w-10 h-10 rounded-lg shrink-0"
+      style={color
+        ? `background: color-mix(in oklch, ${color} 20%, transparent); color: ${color}`
+        : "background: var(--color-muted); color: var(--color-muted-foreground)"
+      }
+    >
+      <span class="text-base font-bold">{label.charAt(0)}</span>
+    </div>
+
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2">
+        <h3 class="font-semibold text-sm truncate">{label}</h3>
+        <span class="inline-flex items-center justify-center h-5 min-w-5 px-1.5 text-xs rounded-full bg-secondary text-secondary-foreground">
           {tasks.length}
-        {/if}
-      </span>
+        </span>
+      </div>
+      <p class="text-xs text-muted-foreground truncate">
+        {#if description}{description.slice(0, 50)}
+        {:else if columnKey === "todo"}Tickets waiting to be processed
+        {:else if columnKey === "done"}Completed tickets
+        {:else}{columnKey} agent{/if}
+      </p>
+    </div>
+
+    <!-- Status indicators -->
+    <div class="flex items-center gap-1.5">
+      {#if processingCount > 0}
+        <div class="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
+          style="background: color-mix(in oklch, {color} 20%, transparent); color: {color}">
+          <span class="w-1.5 h-1.5 rounded-full animate-pulse" style="background: {color}"></span>
+          {processingCount}
+        </div>
+      {/if}
+      {#if awaitingCount > 0}
+        <div class="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
+          style="background: color-mix(in oklch, oklch(0.7 0.15 45) 20%, transparent); color: oklch(0.7 0.15 45)">
+          <span class="w-1.5 h-1.5 rounded-full" style="background: oklch(0.7 0.15 45)"></span>
+          {awaitingCount}
+        </div>
+      {/if}
     </div>
   </div>
+
+  <!-- Tickets -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="column-body"
-    class:drag-over={dragOver}
+    class={cn("flex-1 overflow-y-auto max-h-[calc(100vh-280px)]", dragOver && "bg-primary/5")}
     data-column={columnKey}
-    ondragover={handleDragOver}
-    ondragleave={handleDragLeave}
-    ondrop={handleDrop}
+    ondragover={(e) => { e.preventDefault(); dragOver = true; }}
+    ondragleave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) dragOver = false; }}
+    ondrop={(e) => { e.preventDefault(); dragOver = false; ondrop(e, columnKey); }}
   >
-    {#each filteredTasks as task (task.id)}
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div
-        animate:flip={{ duration: 250 }}
-        transition:fly={{ y: 20, duration: 200 }}
-        ondragstart={(e) => ondragstart(e, task.id)}
-      >
-        <Card {task} {maxLoops} onclick={() => onselect(task.id)} />
-      </div>
-    {:else}
-      <div class="empty">No items</div>
-    {/each}
+    <div class="p-3 flex flex-col gap-3.5">
+      {#if tasks.length === 0}
+        <div class="flex flex-col items-center justify-center py-8 text-muted-foreground">
+          <div class="w-12 h-12 rounded-lg flex items-center justify-center mb-3 opacity-30"
+            style={color ? `background: color-mix(in oklch, ${color} 15%, transparent); color: ${color}` : ""}>
+            <span class="text-xl font-bold">{label.charAt(0)}</span>
+          </div>
+          <p class="text-sm">No tickets</p>
+        </div>
+      {:else}
+        {#each tasks as task (task.id)}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div ondragstart={(e) => ondragstart(e, task.id)}>
+            <Card {task} {maxLoops} onclick={() => onselect(task.id)} />
+          </div>
+        {/each}
+      {/if}
+    </div>
   </div>
 </div>

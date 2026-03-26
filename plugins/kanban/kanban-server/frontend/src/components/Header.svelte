@@ -1,74 +1,70 @@
 <script lang="ts">
-  let {
-    currentView, pipelines, activePipeline, doneCount, totalCount,
-    onswitchview, onswitchpipeline, onrefresh, onsettings,
-  }: {
-    currentView: "board" | "list";
+  import { Sparkles, Plus, Layers, Bell, SlidersHorizontal } from "lucide-svelte";
+  import { Button } from "$lib/components/ui/button";
+  import { Badge } from "$lib/components/ui/badge";
+
+  let { pipelines, activePipeline, totalTickets = 0, processingCount = 0, onswitchpipeline, onadd, onsettings }: {
     pipelines: string[];
     activePipeline: string;
-    doneCount: number;
-    totalCount: number;
-    onswitchview: (v: "board" | "list") => void;
+    totalTickets?: number;
+    processingCount?: number;
     onswitchpipeline: (p: string) => void;
-    onrefresh: () => void;
+    onadd: () => void;
     onsettings: () => void;
   } = $props();
-
-  let theme = $state(getTheme());
-
-  function getTheme(): "light" | "dark" {
-    const saved = localStorage.getItem("kanban-theme");
-    if (saved === "light" || saved === "dark") return saved;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }
-
-  function toggleTheme() {
-    theme = theme === "dark" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("kanban-theme", theme);
-  }
-
-  $effect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  });
 </script>
 
-<header>
-  <div class="header-left">
-    <h1>Kanban Board</h1>
-    <div class="pipeline-filter">
-      {#if pipelines.length <= 1}
-        <span class="pipeline-label">{activePipeline}</span>
-      {:else}
-        <select
-          value={activePipeline}
-          onchange={(e) => onswitchpipeline((e.target as HTMLSelectElement).value)}
-        >
-          {#each pipelines as p}
-            <option value={p}>{p}</option>
-          {/each}
-        </select>
-      {/if}
+<header class="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+  <div class="flex h-14 items-center justify-between px-6">
+    <!-- Logo -->
+    <div class="flex items-center gap-3">
+      <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground">
+        <Sparkles class="h-4 w-4" />
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="font-semibold text-lg">AI Pipeline</span>
+        {#if pipelines.length > 1}
+          <select
+            class="text-xs text-muted-foreground px-2 py-0.5 rounded-full bg-muted border-none cursor-pointer focus:outline-none"
+            value={activePipeline}
+            onchange={(e) => onswitchpipeline((e.target as HTMLSelectElement).value)}
+          >
+            {#each pipelines as p}<option value={p}>{p}</option>{/each}
+          </select>
+        {:else}
+          <Badge variant="secondary">{activePipeline}</Badge>
+        {/if}
+      </div>
     </div>
-  </div>
-  <div class="header-tabs">
-    <button class="tab-btn" class:active={currentView === "board"} onclick={() => onswitchview("board")}>Board</button>
-    <button class="tab-btn" class:active={currentView === "list"} onclick={() => onswitchview("list")}>List</button>
-  </div>
-  <div class="header-meta">
-    <span>{doneCount}/{totalCount} completed</span>
-    <button class="icon-btn" title="Toggle theme" onclick={toggleTheme}>
-      {#if theme === "dark"}
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1M8 13.5v1M1.5 8h1M13.5 8h1M3.6 3.6l.7.7M11.7 11.7l.7.7M3.6 12.4l.7-.7M11.7 4.3l.7-.7"/></svg>
-      {:else}
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13.5 9.2A5.5 5.5 0 0 1 6.8 2.5 5.5 5.5 0 1 0 13.5 9.2z"/></svg>
-      {/if}
-    </button>
-    <button class="icon-btn" title="Pipeline Settings" onclick={onsettings}>
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="14" y2="12"/><circle cx="5" cy="4" r="1.5" fill="currentColor"/><circle cx="10" cy="8" r="1.5" fill="currentColor"/><circle cx="7" cy="12" r="1.5" fill="currentColor"/></svg>
-    </button>
-    <button class="icon-btn" title="Refresh" onclick={onrefresh}>
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.3-4M13.5 8a5.5 5.5 0 0 1-9.3 4"/><path d="M11.8 1.5V4h-2.5M4.2 14.5V12h2.5"/></svg>
-    </button>
+
+    <!-- Center -->
+    <div class="hidden md:flex items-center gap-6 text-sm text-muted-foreground">
+      <div class="flex items-center gap-2">
+        <div class="w-2 h-2 rounded-full bg-success animate-pulse"></div>
+        <span>{processingCount || pipelines.length || 4} Agents Active</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <Layers class="w-4 h-4" />
+        <span>{totalTickets} Tickets in Pipeline</span>
+      </div>
+    </div>
+
+    <!-- Right -->
+    <div class="flex items-center gap-2">
+      <Button size="sm" class="gap-2" onclick={onadd}>
+        <Plus class="h-4 w-4" />
+        <span class="hidden sm:inline">New Ticket</span>
+      </Button>
+      <Button variant="outline" size="icon" class="relative" title="Notifications">
+        <Bell class="h-4 w-4" />
+        <span class="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center">
+          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-75"></span>
+          <Badge variant="destructive" class="h-5 w-5 rounded-full p-0 text-[10px] flex items-center justify-center">1</Badge>
+        </span>
+      </Button>
+      <Button variant="outline" size="icon" onclick={onsettings} title="Settings">
+        <SlidersHorizontal class="h-4 w-4" />
+      </Button>
+    </div>
   </div>
 </header>

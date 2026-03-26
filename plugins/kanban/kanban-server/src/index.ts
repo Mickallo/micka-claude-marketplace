@@ -8,6 +8,34 @@ import boardRoutes from "./routes/board.js";
 import taskRoutes from "./routes/tasks.js";
 import eventsRoutes from "./routes/events.js";
 import { setupTerminalWS } from "./terminal.js";
+import { getDb } from "./db.js";
+import type { Task, Block } from "./types.js";
+
+// Clean up orphaned "running" blocks from previous crashes
+function cleanupRunningBlocks() {
+  const db = getDb();
+  const tasks = db.prepare("SELECT id, blocks FROM tasks").all() as Task[];
+  let cleaned = 0;
+  for (const task of tasks) {
+    const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
+    let changed = false;
+    for (const block of blocks) {
+      if (block.verdict === "running") {
+        block.verdict = "nok";
+        block.content = block.content || `${block.agent} was interrupted`;
+        block.decision_log = "Process was interrupted (server restart or crash)";
+        changed = true;
+        cleaned++;
+      }
+    }
+    if (changed) {
+      db.prepare("UPDATE tasks SET blocks = ? WHERE id = ?").run(JSON.stringify(blocks), task.id);
+    }
+  }
+  if (cleaned > 0) console.log(`Cleaned ${cleaned} orphaned running block(s)`);
+}
+
+cleanupRunningBlocks();
 
 const app = new Hono();
 

@@ -1,46 +1,33 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import Header from "./components/Header.svelte";
-  import Toolbar from "./components/Toolbar.svelte";
+  import PipelineBar from "./components/PipelineBar.svelte";
   import Board from "./components/Board.svelte";
-  import ListView from "./components/ListView.svelte";
-  import TaskModal from "./components/TaskModal.svelte";
+  import TicketSheet from "./components/TicketSheet.svelte";
   import AddCardModal from "./components/AddCardModal.svelte";
   import PipelineSettings from "./components/PipelineSettings.svelte";
-  import Toast from "./components/Toast.svelte";
-  import { fetchBoard, fetchPipelines } from "./lib/api";
+  import { fetchBoard, fetchPipelines, fetchAgents } from "./lib/api";
   import { connectSSE, onSSE, disconnectSSE } from "./lib/sse";
-  import type { BoardResponse, Task } from "./lib/types";
+  import type { BoardResponse, AgentInfo } from "./lib/types";
 
-  let currentView: "board" | "list" = $state("board");
   let currentPipeline = $state(localStorage.getItem("kanban-pipeline") || "");
-  let currentSort = $state(localStorage.getItem("kanban-sort") || "default");
-  let hideOldDone = $state(localStorage.getItem("kanban-hide-old") === "true");
-  let searchQuery = $state("");
   let maxLoops = $state(3);
-
   let boardData: BoardResponse | null = $state(null);
   let selectedTaskId: number | null = $state(null);
   let showAddCard = $state(false);
-  let showPipelineSettings = $state(false);
-  let toastMessage = $state("");
-
+  let showSettings = $state(false);
+  let agentMap = $state(new Map<string, AgentInfo>());
   let refreshTimer: ReturnType<typeof setInterval>;
 
   async function loadBoard() {
     try {
       boardData = await fetchBoard(currentPipeline || undefined);
       currentPipeline = boardData.pipeline;
-    } catch {
-      boardData = null;
-    }
+    } catch { boardData = null; }
   }
 
   async function loadMaxLoops() {
-    try {
-      const p = await fetchPipelines();
-      maxLoops = p.max_loops;
-    } catch {}
+    try { const p = await fetchPipelines(); maxLoops = p.max_loops; } catch {}
   }
 
   function switchPipeline(p: string) {
@@ -49,108 +36,94 @@
     loadBoard();
   }
 
-  function switchView(v: "board" | "list") {
-    currentView = v;
+  function stats() {
+    if (!boardData) return { total: 0, processing: 0, needsInput: 0, completed: 0 };
+    let total = 0, processing = 0, needsInput = 0, completed = 0;
+    for (const [col, tasks] of Object.entries(boardData.columns)) {
+      for (const t of tasks) {
+        total++;
+        if (col === "done") completed++;
+        else if (t.status.startsWith("awaiting:")) needsInput++;
+        else if (col !== "todo") processing++;
+      }
+    }
+    return { total, processing, needsInput, completed };
   }
 
-  function showToast(msg: string) {
-    toastMessage = msg;
-    setTimeout(() => (toastMessage = ""), 3000);
+  async function loadAgents() {
+    try {
+      const agents = await fetchAgents();
+      agentMap = new Map(agents.map(a => [a.name, a]));
+    } catch {}
   }
 
   onMount(() => {
     loadBoard();
     loadMaxLoops();
+    loadAgents();
     connectSSE();
     const unsub = onSSE("*", () => loadBoard());
     refreshTimer = setInterval(loadBoard, 10000);
     return () => { unsub(); clearInterval(refreshTimer); disconnectSSE(); };
   });
 
-  onDestroy(() => {
-    clearInterval(refreshTimer);
-    disconnectSSE();
-  });
+  onDestroy(() => { clearInterval(refreshTimer); disconnectSSE(); });
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") {
-      selectedTaskId = null;
-      showAddCard = false;
-      showPipelineSettings = false;
-    }
+    if (e.key === "Escape") { selectedTaskId = null; showAddCard = false; showSettings = false; }
   }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
-<Header
-  {currentView}
-  pipelines={boardData?.pipelines ?? []}
-  activePipeline={boardData?.pipeline ?? ""}
-  doneCount={boardData ? (boardData.columns["done"]?.length ?? 0) : 0}
-  totalCount={boardData ? Object.values(boardData.columns).reduce((s, c) => s + c.length, 0) : 0}
-  onswitchview={switchView}
-  onswitchpipeline={switchPipeline}
-  onrefresh={loadBoard}
-  onsettings={() => (showPipelineSettings = true)}
-/>
-
-<Toolbar
-  bind:searchQuery
-  bind:currentSort
-  bind:hideOldDone
-  onsortchange={() => { localStorage.setItem("kanban-sort", currentSort); loadBoard(); }}
-  onhidedonechange={() => localStorage.setItem("kanban-hide-old", String(hideOldDone))}
-/>
-
-{#if currentView === "board"}
-  <Board
-    data={boardData}
-    {searchQuery}
-    {hideOldDone}
-    {currentSort}
-    {maxLoops}
-    onselect={(id) => (selectedTaskId = id)}
+<div class="min-h-screen bg-background">
+  <Header
+    pipelines={boardData?.pipelines ?? []}
+    activePipeline={boardData?.pipeline ?? ""}
+    totalTickets={stats().total}
+    processingCount={stats().processing}
+    onswitchpipeline={switchPipeline}
     onadd={() => (showAddCard = true)}
-    onreorder={loadBoard}
-    ontoast={showToast}
+    onsettings={() => (showSettings = true)}
   />
-{:else}
-  <ListView
-    data={boardData}
-    {searchQuery}
-    {hideOldDone}
-    {maxLoops}
-    onselect={(id) => (selectedTaskId = id)}
-    onrefresh={loadBoard}
-    ontoast={showToast}
-  />
-{/if}
 
-{#if selectedTaskId !== null}
-  <TaskModal
-    taskId={selectedTaskId}
+  <PipelineBar
     columnOrder={boardData?.column_order ?? []}
-    {maxLoops}
-    onclose={() => { selectedTaskId = null; loadBoard(); }}
+    stats={stats()}
   />
-{/if}
 
-{#if showAddCard}
-  <AddCardModal
-    pipeline={currentPipeline}
-    onclose={() => { showAddCard = false; loadBoard(); }}
-  />
-{/if}
+  <main class="py-6">
+    <Board
+      data={boardData}
+      {maxLoops}
+      {agentMap}
+      onselect={(id) => (selectedTaskId = id)}
+      onadd={() => (showAddCard = true)}
+      onreorder={loadBoard}
+    />
+  </main>
 
-{#if showPipelineSettings}
-  <PipelineSettings
-    activePipeline={currentPipeline}
-    onclose={() => { showPipelineSettings = false; loadBoard(); }}
-    onsave={(p) => switchPipeline(p)}
-  />
-{/if}
+  {#if selectedTaskId !== null}
+    <TicketSheet
+      taskId={selectedTaskId}
+      columnOrder={boardData?.column_order ?? []}
+      {maxLoops}
+      onclose={() => { selectedTaskId = null; loadBoard(); }}
+    />
+  {/if}
 
-{#if toastMessage}
-  <Toast message={toastMessage} />
-{/if}
+  {#if showAddCard}
+    <AddCardModal
+      pipeline={currentPipeline}
+      onclose={() => { showAddCard = false; loadBoard(); }}
+    />
+  {/if}
+
+  {#if showSettings}
+    <PipelineSettings
+      activePipeline={currentPipeline}
+      onclose={() => { showSettings = false; loadBoard(); }}
+      onsave={switchPipeline}
+    />
+  {/if}
+</div>

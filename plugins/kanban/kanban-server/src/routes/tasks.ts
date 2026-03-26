@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import { getDb, renumberRanks, IMAGES_DIR } from "../db.js";
@@ -241,14 +242,37 @@ app.post("/api/task/:id/block", async (c) => {
     agent_id: body.agent_id || null,
     content: body.content || "",
     decision_log: body.decision_log || "",
-    verdict: body.verdict === "nok" ? "nok" : body.verdict === "relay" ? "relay" : "ok",
+    verdict: body.verdict === "nok" ? "nok" : body.verdict === "relay" ? "relay" : body.verdict === "running" ? "running" : "ok",
     timestamp: new Date().toISOString(),
   };
   blocks.push(newBlock);
 
   db.prepare("UPDATE tasks SET blocks = ? WHERE id = ?").run(JSON.stringify(blocks), id);
   eventBus.blockAdded(id, newBlock.agent, newBlock.verdict);
-  return c.json({ success: true, block: newBlock });
+  return c.json({ success: true, block: newBlock, index: blocks.length - 1 });
+});
+
+// Update the last block (used by runner when agent finishes)
+app.patch("/api/task/:id/block", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  const body = await c.req.json();
+  const db = getDb();
+
+  const task = db.prepare("SELECT blocks FROM tasks WHERE id = ?").get(id) as { blocks: string | null } | undefined;
+  if (!task) return c.json({ error: "Not found" }, 404);
+
+  const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
+  if (blocks.length === 0) return c.json({ error: "No blocks to update" }, 400);
+
+  const last = blocks[blocks.length - 1];
+  if (body.agent_id !== undefined) last.agent_id = body.agent_id;
+  if (body.content !== undefined) last.content = body.content;
+  if (body.decision_log !== undefined) last.decision_log = body.decision_log;
+  if (body.verdict !== undefined) last.verdict = body.verdict;
+
+  db.prepare("UPDATE tasks SET blocks = ? WHERE id = ?").run(JSON.stringify(blocks), id);
+  eventBus.blockAdded(id, last.agent, last.verdict);
+  return c.json({ success: true, block: last });
 });
 
 // ── Gates ────────────────────────────────────────────────
@@ -431,6 +455,48 @@ app.get("/api/uploads/:filename", (c) => {
       "Cache-Control": "public, max-age=86400",
     },
   });
+});
+
+// ── Run pipeline ─────────────────────────────────────────
+
+const runnerScript = path.resolve(import.meta.dirname, "..", "runner.ts");
+const runningTasks = new Map<number, ReturnType<typeof spawn>>();
+
+app.post("/api/task/:id/run", (c) => {
+  const id = parseInt(c.req.param("id"));
+
+  if (runningTasks.has(id)) {
+    return c.json({ error: "Pipeline already running for this task" }, 400);
+  }
+
+  const proc = spawn("npx", ["tsx", runnerScript, "run", String(id), "--auto"], {
+    cwd: process.cwd(),
+    env: { ...process.env },
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: false,
+  });
+
+  runningTasks.set(id, proc);
+
+  proc.stdout?.on("data", (d: Buffer) => console.log(`[runner #${id}] ${d.toString().trim()}`));
+  proc.stderr?.on("data", (d: Buffer) => console.error(`[runner #${id}] ${d.toString().trim()}`));
+
+  proc.on("close", () => {
+    runningTasks.delete(id);
+    console.log(`[runner #${id}] finished`);
+  });
+
+  return c.json({ success: true, pid: proc.pid });
+});
+
+app.post("/api/task/:id/stop", (c) => {
+  const id = parseInt(c.req.param("id"));
+  const proc = runningTasks.get(id);
+  if (!proc) return c.json({ error: "No running pipeline for this task" }, 404);
+
+  proc.kill("SIGTERM");
+  runningTasks.delete(id);
+  return c.json({ success: true });
 });
 
 export default app;

@@ -99,3 +99,11 @@ export async function savePipelines(data: PipelinesFile): Promise<void> {
 export async function fetchAgents(): Promise<AgentInfo[]> {
   return json("/api/agents");
 }
+
+export async function runPipeline(taskId: number): Promise<{ success: boolean; pid?: number; error?: string }> {
+  return json(`/api/task/${taskId}/run`, { method: "POST" });
+}
+
+export async function stopPipeline(taskId: number): Promise<{ success: boolean; error?: string }> {
+  return json(`/api/task/${taskId}/stop`, { method: "POST" });
+}

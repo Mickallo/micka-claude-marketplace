@@ -177,7 +177,16 @@ export async function runPipeline(opts: RunOptions): Promise<void> {
         }
       }
 
-      // 6. Spawn or resume claude
+      // 6. Write a "running" block so the UI can show it live
+      await apiPost(`/api/task/${taskId}/block`, {
+        agent: currentStage,
+        agent_id: null,
+        content: `Running ${currentStage}...`,
+        decision_log: "",
+        verdict: "running",
+      });
+
+      // 7. Spawn or resume claude
       let result;
       if (isRetry && sessionId && retryBlock) {
         const isRelay = retryBlock.verdict === "relay";
@@ -191,20 +200,18 @@ export async function runPipeline(opts: RunOptions): Promise<void> {
         const prompt = buildPrompt(task, blocks, notes);
         result = await spawnClaude({
           prompt,
-          model: undefined, // Let the agent definition handle model
+          model: undefined,
           cwd: repo || undefined,
         });
       }
 
-      // 7. Parse verdict
+      // 8. Parse verdict and update the running block
       const parsed = parseAgentOutput(result.output);
       const capturedSessionId = result.sessionId;
 
       onLog(`Task #${taskId}: ${currentStage} -> ${parsed.verdict}`);
 
-      // 8. Write block
-      await apiPost(`/api/task/${taskId}/block`, {
-        agent: currentStage,
+      await apiPatch(`/api/task/${taskId}/block`, {
         agent_id: capturedSessionId,
         content: parsed.content,
         decision_log: parsed.decision_log,
