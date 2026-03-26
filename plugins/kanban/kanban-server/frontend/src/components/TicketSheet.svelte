@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { X, Clock, AlertCircle, CheckCircle, Loader2, Play, Trash2, ChevronDown, ChevronRight, Terminal as TerminalIcon, Copy, Check, Send } from "lucide-svelte";
+  import { X, Clock, AlertCircle, CheckCircle, Loader2, Play, Trash2, Terminal as TerminalIcon, Copy, Check, Send } from "lucide-svelte";
   import { cn } from "../lib/cn";
   import { md } from "../lib/markdown";
   import type { Task, Block, Note, Attachment } from "../lib/types";
@@ -21,7 +21,7 @@
   let task: Task | null = $state(null);
   let noteText = $state("");
   let refuseComment = $state("");
-  let expandedBlocks = $state(new Set<number>());
+  let selectedBlockIdx: number | null = $state(null);
   let terminalBlockIdx: number | null = $state(null);
   let copied = $state<number | null>(null);
 
@@ -31,7 +31,17 @@
   let isBlocked = $derived(task ? task.loop_count >= maxLoops : false);
   let awaitingStage = $derived(task?.status.startsWith("awaiting:") ? task.status.slice("awaiting:".length) : null);
   let hasRunningBlock = $derived(blocks.some(b => b.verdict === "running"));
-
+  let selectedBlock = $derived(selectedBlockIdx !== null ? blocks[selectedBlockIdx] ?? null : null);
+  let detailTab: "content" | "terminal" = $state("content");
+  let canResume = $derived(
+    selectedBlock !== null &&
+    selectedBlock.agent_id !== null &&
+    selectedBlock.verdict !== "running" &&
+    selectedBlock.verdict !== "info" &&
+    !selectedBlock.agent_id?.startsWith("term_") &&
+    !hasRunningBlock &&
+    (task?.status === "done" || task?.status === "todo" || task?.status?.startsWith("awaiting:"))
+  );
 
   async function load() {
     try { task = await fetchTask(taskId); } catch (e) { console.error("Load failed:", e); }
@@ -64,14 +74,18 @@
     await deleteTask(task.id);
     onclose();
   }
-  function toggleBlock(idx: number) {
-    const s = new Set(expandedBlocks);
-    if (s.has(idx)) s.delete(idx); else s.add(idx);
-    expandedBlocks = s;
+  function selectBlock(idx: number) {
+    if (blocks[idx]?.verdict === "running") return;
+    if (selectedBlockIdx === idx) {
+      selectedBlockIdx = null;
+    } else {
+      selectedBlockIdx = idx;
+      detailTab = "content";
+    }
   }
-  function handleCopy(idx: number, content: string) {
+  function handleCopy(content: string) {
     navigator.clipboard.writeText(content);
-    copied = idx;
+    copied = selectedBlockIdx;
     setTimeout(() => (copied = null), 2000);
   }
 </script>
@@ -80,8 +94,11 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onclick={onclose}></div>
 
-<!-- Sheet from right -->
-<div class="fixed inset-y-0 right-0 z-50 w-full sm:max-w-xl md:max-w-2xl lg:max-w-3xl flex flex-col bg-background border-l shadow-xl animate-slide-in">
+<!-- Sheet from right — widens when a block is selected -->
+<div class={cn(
+  "fixed inset-y-0 right-0 z-50 flex flex-col bg-background border-l shadow-xl animate-slide-in transition-[max-width] duration-200",
+  selectedBlock ? "w-full max-w-6xl" : "w-full sm:max-w-xl md:max-w-2xl"
+)}>
   {#if !task}
     <div class="flex-1 flex items-center justify-center text-muted-foreground">
       <Loader2 class="w-6 h-6 animate-spin" />
@@ -207,166 +224,183 @@
       </div>
     </div>
 
-    <!-- Terminal (if open) -->
-    {#if terminalBlockIdx !== null && blocks[terminalBlockIdx]?.agent_id}
-      {@const termBlock = blocks[terminalBlockIdx]}
-      <div class="border-b bg-card shrink-0">
-        <div class="flex items-center justify-between px-4 py-2 border-b">
-          <span class="text-xs font-medium">
-            {termBlock.agent} Terminal
-            {#if termBlock.verdict === "running"}
-              <span class="text-primary ml-1">(live)</span>
-            {/if}
-          </span>
-          <button class="text-xs text-muted-foreground hover:text-foreground" onclick={() => (terminalBlockIdx = null)}>Close</button>
-        </div>
-        <div class="h-[300px]">
-          <TerminalView id={termBlock.agent_id} />
-        </div>
-      </div>
-    {/if}
+    <!-- Main content: split blocks list / detail -->
+    <div class="flex-1 flex min-h-0">
+      <!-- Left: Blocks list -->
+      <div class={cn(
+        "flex flex-col border-r shrink-0 overflow-hidden transition-[width] duration-200",
+        selectedBlock ? "w-72" : "w-full"
+      )}>
+        <div class="flex-1 overflow-y-auto p-3">
+          {#if blocks.length === 0}
+            <div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <Clock class="w-12 h-12 mb-4 opacity-50" />
+              <p class="text-sm font-medium">No blocks yet</p>
+              <p class="text-xs mt-1">Run the pipeline to see agent activity</p>
+            </div>
+          {:else}
+            <div class="text-xs text-muted-foreground mb-2 px-1">
+              {blocks.length} {blocks.length === 1 ? "block" : "blocks"}
+            </div>
 
-    <!-- Blocks list -->
-    <div class="flex-1 overflow-y-auto p-4">
-      <div class="flex flex-col gap-3">
-        {#if blocks.length === 0}
-          <div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <Clock class="w-12 h-12 mb-4 opacity-50" />
-            <p class="text-sm font-medium">No blocks yet</p>
-            <p class="text-xs mt-1">Run the pipeline to see agent activity</p>
-          </div>
-        {:else}
-          <div class="text-xs text-muted-foreground mb-2">
-            {blocks.length} {blocks.length === 1 ? "block" : "blocks"} from {[...new Set(blocks.map(b => b.agent))].length} agents
-          </div>
-
-          {#each blocks as block, idx}
-            {@const bcolor = getAgentColor(block.agent)}
-            {@const isRunning = block.verdict === "running"}
-            {@const isUser = block.verdict === "info"}
-            <div
-              class={cn(
-                "rounded-lg border bg-card overflow-hidden border-l-4",
-                isRunning && "border-primary/50 shadow-lg shadow-primary/5",
-                isUser && "border-l-muted-foreground/30"
-              )}
-              style={!isUser ? `border-left-color: ${bcolor}` : ""}
-            >
-              <!-- Block header -->
-              <button
-                class={cn("w-full flex items-center gap-3 p-3 hover:bg-secondary/30 transition-colors text-left", isRunning && "animate-pulse")}
-                onclick={() => isRunning ? null : toggleBlock(idx)}
-              >
-                {#if isUser}
-                  <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-muted text-muted-foreground text-xs font-bold">
-                    {block.agent === "user" ? "U" : block.agent.charAt(0).toUpperCase()}
-                  </div>
-                {:else}
-                  <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white text-xs font-bold" style="background: {bcolor}">
-                    {#if isRunning}
-                      <Loader2 class="w-4 h-4 animate-spin" />
-                    {:else}
-                      {block.agent.charAt(0)}
-                    {/if}
-                  </div>
-                {/if}
-
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="font-medium text-sm truncate">
-                      {isUser ? (block.agent === "user" ? "User" : block.agent) : block.agent}
-                    </span>
-                    {#if isRunning}
-                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">running</span>
-                    {:else if isUser}
-                      <!-- no verdict badge for user blocks -->
-                    {:else}
-                      <span class={cn(
-                        "text-[10px] px-1.5 py-0.5 rounded",
-                        block.verdict === "ok" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive"
-                      )}>{block.verdict}</span>
-                    {/if}
-                  </div>
-                  <span class="text-xs text-muted-foreground">{formatDistanceToNow(block.timestamp)}</span>
-                </div>
-
-                <div class="flex items-center gap-1 shrink-0">
-                  {#if isRunning}
-                    <Loader2 class="w-4 h-4 text-primary animate-spin" />
+            <div class="flex flex-col gap-1.5">
+              {#each blocks as block, idx}
+                {@const bcolor = getAgentColor(block.agent)}
+                {@const isRunning = block.verdict === "running"}
+                {@const isUser = block.verdict === "info"}
+                {@const isSelected = selectedBlockIdx === idx}
+                <button
+                  class={cn(
+                    "w-full flex items-center gap-2.5 p-2.5 rounded-lg border border-l-[3px] text-left transition-all",
+                    isRunning && "border-primary/50 animate-pulse cursor-default",
+                    isSelected && !isRunning && "bg-secondary shadow-sm",
+                    !isSelected && !isRunning && "border-transparent hover:bg-secondary/50",
+                    isUser && "opacity-70 border-l-muted-foreground/30"
+                  )}
+                  style={!isUser ? `border-left-color: ${bcolor}` : ""}
+                  onclick={() => selectBlock(idx)}
+                >
+                  {#if isUser}
+                    <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0 bg-muted text-muted-foreground text-xs font-bold">
+                      {block.agent === "user" ? "U" : block.agent.charAt(0).toUpperCase()}
+                    </div>
                   {:else}
-                    {#if expandedBlocks.has(idx)}
-                      <ChevronDown class="w-4 h-4 text-muted-foreground" />
-                    {:else}
-                      <ChevronRight class="w-4 h-4 text-muted-foreground" />
-                    {/if}
-                  {/if}
-                </div>
-              </button>
-
-              <!-- Block content (expanded) -->
-              {#if expandedBlocks.has(idx)}
-                <div class="border-t">
-                  <div class="relative">
-                    <!-- Action buttons -->
-                    <div class="absolute top-2 right-2 flex items-center gap-1 z-10">
-                      <button
-                        class="inline-flex items-center gap-1 h-6 px-2 text-xs rounded bg-secondary/80 hover:bg-secondary border border-border"
-                        onclick={() => handleCopy(idx, block.content)}
-                      >
-                        {#if copied === idx}
-                          <Check class="w-3 h-3 text-success" /> Copied
-                        {:else}
-                          <Copy class="w-3 h-3" /> Copy
-                        {/if}
-                      </button>
-                      {#if block.agent_id && !isRunning && !isUser && !block.agent_id.startsWith("term_") && !hasRunningBlock && (task?.status === "done" || task?.status === "todo" || task?.status.startsWith("awaiting:"))}
-                        <button
-                          class="inline-flex items-center gap-1 h-6 px-2 text-xs rounded bg-secondary/80 hover:bg-secondary border border-border"
-                          onclick={() => (terminalBlockIdx = terminalBlockIdx === idx ? null : idx)}
-                        >
-                          <TerminalIcon class="w-3 h-3" /> Resume
-                        </button>
+                    <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0 text-white text-xs font-bold" style="background: {bcolor}">
+                      {#if isRunning}
+                        <Loader2 class="w-3.5 h-3.5 animate-spin" />
+                      {:else}
+                        {block.agent.charAt(0)}
                       {/if}
                     </div>
+                  {/if}
 
-                    <div class="p-4 text-sm overflow-x-auto">
-                      <div class="prose-sm">{@html md(block.content)}</div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-1.5">
+                      <span class="font-medium text-xs truncate">
+                        {isUser ? (block.agent === "user" ? "User" : block.agent) : block.agent}
+                      </span>
+                      {#if isRunning}
+                        <span class="text-[9px] px-1 py-0.5 rounded bg-primary/20 text-primary leading-none">running</span>
+                      {:else if !isUser}
+                        <span class={cn(
+                          "text-[9px] px-1 py-0.5 rounded leading-none",
+                          block.verdict === "ok" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive"
+                        )}>{block.verdict}</span>
+                      {/if}
                     </div>
-
-                    {#if block.decision_log}
-                      <details class="px-4 pb-4 border-t pt-3">
-                        <summary class="text-xs text-muted-foreground font-medium cursor-pointer">Decision Log</summary>
-                        <div class="mt-2 text-sm">{@html md(block.decision_log)}</div>
-                      </details>
-                    {/if}
+                    <span class="text-[10px] text-muted-foreground">{formatDistanceToNow(block.timestamp)}</span>
                   </div>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
+        <!-- Note input -->
+        <div class="p-3 border-t bg-card shrink-0">
+          <div class="flex gap-1.5">
+            <input
+              class={cn(
+                "flex-1 px-2.5 py-1.5 text-sm rounded-md bg-secondary border border-border",
+                selectedBlock && "text-xs"
+              )}
+              placeholder={isBlocked ? "Comment to unblock..." : "Add a note..."}
+              bind:value={noteText}
+              onkeydown={(e) => e.key === "Enter" && handleAddNote()}
+            />
+            <button
+              class="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
+              onclick={handleAddNote}
+            >
+              <Send class="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Block detail -->
+      {#if selectedBlock}
+        <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <!-- Detail header with tabs -->
+          <div class="flex items-center justify-between px-4 py-2 border-b bg-card shrink-0">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0 text-white text-xs font-bold" style="background: {getAgentColor(selectedBlock.agent)}">
+                {selectedBlock.agent.charAt(0)}
+              </div>
+              <span class="font-medium text-sm">{selectedBlock.agent}</span>
+              {#if selectedBlock.verdict !== "info"}
+                <span class={cn(
+                  "text-[10px] px-1.5 py-0.5 rounded",
+                  selectedBlock.verdict === "ok" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive"
+                )}>{selectedBlock.verdict}</span>
+              {/if}
+
+              <!-- Tabs -->
+              <div class="flex items-center gap-0.5 ml-3 bg-secondary rounded-md p-0.5">
+                <button
+                  class={cn(
+                    "px-3 py-1 text-xs rounded transition-all",
+                    detailTab === "content" ? "bg-card text-foreground shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
+                  )}
+                  onclick={() => (detailTab = "content")}
+                >Content</button>
+                {#if canResume}
+                  <button
+                    class={cn(
+                      "px-3 py-1 text-xs rounded transition-all flex items-center gap-1",
+                      detailTab === "terminal" ? "bg-card text-foreground shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
+                    )}
+                    onclick={() => { detailTab = "terminal"; terminalBlockIdx = selectedBlockIdx; }}
+                  >
+                    <TerminalIcon class="w-3 h-3" /> Terminal
+                  </button>
+                {/if}
+              </div>
+            </div>
+
+            <div class="flex items-center gap-1.5 shrink-0">
+              {#if detailTab === "content"}
+                <button
+                  class="inline-flex items-center gap-1 h-7 px-2.5 text-xs rounded-md bg-secondary hover:bg-secondary/80 border border-border"
+                  onclick={() => handleCopy(selectedBlock!.content)}
+                >
+                  {#if copied === selectedBlockIdx}
+                    <Check class="w-3 h-3 text-success" /> Copied
+                  {:else}
+                    <Copy class="w-3 h-3" /> Copy
+                  {/if}
+                </button>
+              {/if}
+              <button
+                class="w-7 h-7 rounded-md flex items-center justify-center hover:bg-secondary"
+                onclick={() => (selectedBlockIdx = null)}
+              >
+                <X class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Tab content -->
+          {#if detailTab === "content"}
+            <div class="flex-1 overflow-y-auto p-5">
+              <div class="prose prose-sm max-w-none">{@html md(selectedBlock.content)}</div>
+
+              {#if selectedBlock.decision_log}
+                <div class="mt-6 pt-4 border-t">
+                  <h4 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Decision Log</h4>
+                  <div class="prose prose-sm max-w-none text-muted-foreground">{@html md(selectedBlock.decision_log)}</div>
                 </div>
               {/if}
             </div>
-          {/each}
-        {/if}
-
-        <!-- Notes are now in blocks (verdict: "info") — no separate section needed -->
-      </div>
-    </div>
-
-    <!-- Note input -->
-    <div class="p-4 border-t bg-card shrink-0">
-      <div class="flex gap-2">
-        <input
-          class="flex-1 px-3 py-2 text-sm rounded-md bg-secondary border border-border"
-          placeholder={isBlocked ? "Comment to unblock..." : "Add a note..."}
-          bind:value={noteText}
-          onkeydown={(e) => e.key === "Enter" && handleAddNote()}
-        />
-        <button
-          class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-          onclick={handleAddNote}
-        >
-          <Send class="w-3.5 h-3.5" />
-          {isBlocked ? "Unblock" : "Send"}
-        </button>
-      </div>
+          {:else if detailTab === "terminal" && terminalBlockIdx !== null && blocks[terminalBlockIdx]?.agent_id}
+            <div class="flex-1 min-h-0 relative">
+              <div class="absolute inset-0">
+                <TerminalView id={blocks[terminalBlockIdx].agent_id!} />
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
