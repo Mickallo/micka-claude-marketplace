@@ -32,7 +32,7 @@
   let awaitingStage = $derived(task?.status.startsWith("awaiting:") ? task.status.slice("awaiting:".length) : null);
   let hasRunningBlock = $derived(blocks.some(b => b.verdict === "running"));
   let selectedBlock = $derived(selectedBlockIdx !== null ? blocks[selectedBlockIdx] ?? null : null);
-  let detailTab: "content" | "terminal" = $state("content");
+  let detailTab: "content" | "decision_log" | "terminal" = $state("content");
   let canResume = $derived(
     selectedBlock !== null &&
     selectedBlock.agent_id !== null &&
@@ -344,6 +344,15 @@
                   )}
                   onclick={() => (detailTab = "content")}
                 >Content</button>
+                {#if selectedBlock.decision_log}
+                  <button
+                    class={cn(
+                      "px-3 py-1 text-xs rounded transition-all",
+                      detailTab === "decision_log" ? "bg-card text-foreground shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
+                    )}
+                    onclick={() => (detailTab = "decision_log")}
+                  >Decision Log</button>
+                {/if}
                 {#if canResume}
                   <button
                     class={cn(
@@ -384,13 +393,10 @@
           {#if detailTab === "content"}
             <div class="flex-1 overflow-y-auto p-5">
               <div class="prose prose-sm max-w-none">{@html md(selectedBlock.content)}</div>
-
-              {#if selectedBlock.decision_log}
-                <div class="mt-6 pt-4 border-t">
-                  <h4 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Decision Log</h4>
-                  <div class="prose prose-sm max-w-none text-muted-foreground">{@html md(selectedBlock.decision_log)}</div>
-                </div>
-              {/if}
+            </div>
+          {:else if detailTab === "decision_log" && selectedBlock.decision_log}
+            <div class="flex-1 overflow-y-auto p-5">
+              <div class="prose prose-sm max-w-none text-muted-foreground">{@html md(selectedBlock.decision_log)}</div>
             </div>
           {:else if detailTab === "terminal" && terminalBlockIdx !== null && blocks[terminalBlockIdx]?.agent_id}
             <div class="flex-1 min-h-0 relative">
