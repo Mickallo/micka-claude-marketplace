@@ -23,6 +23,14 @@ class EventBus extends EventEmitter {
   blockAdded(taskId: number, agent: string, verdict: string) {
     this.emit("task", { type: "task:block", taskId, data: { agent, verdict } });
   }
+
+  notificationCreated(notif: { id: number; taskId: number; type: string; title: string; message: string }) {
+    this.emit("task", {
+      type: "notification:new",
+      taskId: notif.taskId,
+      data: { id: notif.id, title: notif.title, message: notif.message, notifType: notif.type },
+    });
+  }
 }
 
 export const eventBus = new EventBus();

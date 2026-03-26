@@ -36,6 +36,19 @@ export function getDb(): Database.Database {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL DEFAULT '',
+      read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    );
+  `);
+
   // Migrations
   try { db.exec(`ALTER TABLE tasks ADD COLUMN pipeline TEXT NOT NULL DEFAULT 'full'`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE tasks ADD COLUMN blocks TEXT DEFAULT '[]'`); } catch { /* exists */ }

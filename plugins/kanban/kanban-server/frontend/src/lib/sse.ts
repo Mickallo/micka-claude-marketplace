@@ -7,7 +7,7 @@ export function connectSSE() {
   if (eventSource) return;
   eventSource = new EventSource("/api/events");
 
-  for (const eventType of ["task:updated", "task:moved", "task:block"]) {
+  for (const eventType of ["task:updated", "task:moved", "task:block", "notification:new"]) {
     eventSource.addEventListener(eventType, (e) => {
       try {
         const data = JSON.parse((e as MessageEvent).data);

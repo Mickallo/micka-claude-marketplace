@@ -41,6 +41,17 @@
     addSelect = "";
     pipelinesData = { ...pipelinesData };
   }
+  let dragIdx: number | null = $state(null);
+
+  function handleStageDrop(e: DragEvent, dropIdx: number) {
+    e.preventDefault();
+    if (!pipelinesData || dragIdx === null || dragIdx === dropIdx) return;
+    const [moved] = pipelinesData.pipelines[editingName].stages.splice(dragIdx, 1);
+    pipelinesData.pipelines[editingName].stages.splice(dropIdx, 0, moved);
+    dragIdx = null;
+    pipelinesData = { ...pipelinesData };
+  }
+
   async function handleSave() {
     if (!pipelinesData) return;
     await savePipelines(pipelinesData);
@@ -77,8 +88,18 @@
           <div class="flex flex-col gap-1">
             {#each pipeline.stages as stage, i}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class={cn("flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-all border border-transparent hover:bg-secondary", selectedAgent === stage && "bg-primary/10 border-primary/30")}
-                onclick={() => (selectedAgent = stage)}>
+              <div class={cn(
+                  "flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-all border border-transparent hover:bg-secondary",
+                  selectedAgent === stage && "bg-primary/10 border-primary/30",
+                  dragIdx === i && "opacity-40"
+                )}
+                draggable="true"
+                onclick={() => (selectedAgent = stage)}
+                ondragstart={(e) => { dragIdx = i; e.dataTransfer!.effectAllowed = "move"; }}
+                ondragend={() => (dragIdx = null)}
+                ondragover={(e) => e.preventDefault()}
+                ondrop={(e) => { e.preventDefault(); handleStageDrop(e, i); }}
+              >
                 <GripVertical class="w-3.5 h-3.5 text-muted-foreground cursor-grab" />
                 <span class="text-sm font-medium flex-1">{stage}</span>
                 {#if agentMap.get(stage)?.model}

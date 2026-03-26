@@ -19,6 +19,41 @@
   let agentMap = $state(new Map<string, AgentInfo>());
   let refreshTimer: ReturnType<typeof setInterval>;
 
+  interface Notification {
+    id: number;
+    task_id: number;
+    type: string;
+    title: string;
+    message: string;
+    read: boolean;
+    created_at: string;
+  }
+  let notifications: Notification[] = $state([]);
+
+  async function loadNotifications() {
+    try {
+      notifications = await json<Notification[]>("/api/notifications");
+    } catch {}
+  }
+
+  async function markNotifRead(id: number) {
+    try {
+      await fetch(`/api/notifications/${id}/read`, { method: "POST" });
+      notifications = notifications.map(n => n.id === id ? { ...n, read: true } : n);
+    } catch {}
+  }
+
+  async function markAllRead() {
+    try {
+      await fetch("/api/notifications/read-all", { method: "POST" });
+      notifications = notifications.map(n => ({ ...n, read: true }));
+    } catch {}
+  }
+
+  function json<T>(url: string): Promise<T> {
+    return fetch(url).then(r => r.json());
+  }
+
   async function loadBoard() {
     try {
       boardData = await fetchBoard(currentPipeline || undefined);
@@ -61,10 +96,24 @@
     loadBoard();
     loadMaxLoops();
     loadAgents();
+    loadNotifications();
     connectSSE();
-    const unsub = onSSE("*", () => loadBoard());
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+    const unsubBoard = onSSE("*", () => loadBoard());
+    const unsubNotif = onSSE("notification:new", (data) => {
+      loadNotifications();
+      // Browser notification
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification(String(data.title || "Kanban"), {
+          body: String(data.message || ""),
+          tag: `notif-${data.id}`,
+        });
+      }
+    });
     refreshTimer = setInterval(loadBoard, 10000);
-    return () => { unsub(); clearInterval(refreshTimer); disconnectSSE(); };
+    return () => { unsubBoard(); unsubNotif(); clearInterval(refreshTimer); disconnectSSE(); };
   });
 
   onDestroy(() => { clearInterval(refreshTimer); disconnectSSE(); });
@@ -82,9 +131,12 @@
     activePipeline={boardData?.pipeline ?? ""}
     totalTickets={stats().total}
     processingCount={stats().processing}
+    {notifications}
     onswitchpipeline={switchPipeline}
     onadd={() => (showAddCard = true)}
     onsettings={() => (showSettings = true)}
+    onnotificationclick={(taskId, notifId) => { selectedTaskId = taskId; markNotifRead(notifId); }}
+    onmarkallread={markAllRead}
   />
 
   <PipelineBar

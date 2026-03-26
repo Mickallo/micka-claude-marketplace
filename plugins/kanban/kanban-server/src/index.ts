@@ -11,9 +11,12 @@ import pipelinesRoutes from "./routes/pipelines.js";
 import boardRoutes from "./routes/board.js";
 import taskRoutes from "./routes/tasks.js";
 import eventsRoutes from "./routes/events.js";
+import notificationsRoutes from "./routes/notifications.js";
 import { setupTerminalWS } from "./terminal.js";
 import { getDb } from "./db.js";
 import type { Task, Block } from "./types.js";
+// Initialize notification listeners (hooks into eventBus)
+import "./notifications.js";
 
 // Clean up orphaned "running" blocks from previous crashes
 function cleanupRunningBlocks() {
@@ -104,6 +107,7 @@ app.route("/", pipelinesRoutes);
 app.route("/", boardRoutes);
 app.route("/", taskRoutes);
 app.route("/", eventsRoutes);
+app.route("/", notificationsRoutes);
 
 // Serve static files from Svelte frontend build
 const staticRoot = path.resolve(import.meta.dirname, "..", "dist");
