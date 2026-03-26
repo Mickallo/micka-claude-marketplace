@@ -129,11 +129,11 @@
                 <span class="text-[10px] font-bold" style="color: var(--color-background)">{block.agent.charAt(0)}</span>
               </div>
               <span class="text-xs font-medium truncate flex-1">{btitle}</span>
-              {#if block.verdict !== "ok"}
-                <span class="text-[10px] px-1.5 py-0.5 rounded-full" style="background: color-mix(in oklch, oklch(0.7 0.15 45) 20%, transparent); color: oklch(0.7 0.15 45)">
-                  {block.verdict}
-                </span>
-              {/if}
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full"
+                style={block.verdict === "ok"
+                  ? "background: color-mix(in oklch, oklch(0.75 0.15 145) 20%, transparent); color: oklch(0.75 0.15 145)"
+                  : "background: color-mix(in oklch, oklch(0.6 0.2 25) 20%, transparent); color: oklch(0.6 0.2 25)"}
+              >{block.verdict}</span>
             </div>
           </button>
         {/each}

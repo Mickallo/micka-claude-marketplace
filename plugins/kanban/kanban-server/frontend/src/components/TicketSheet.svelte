@@ -199,9 +199,6 @@
             <Play class="w-3.5 h-3.5" /> Run Pipeline
           </button>
         {/if}
-        <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md text-destructive hover:bg-destructive/10" onclick={handleDelete}>
-          <Trash2 class="w-3.5 h-3.5" /> Delete
-        </button>
       </div>
     </div>
 
@@ -314,6 +311,11 @@
           {/if}
         </div>
 
+        <div class="p-3 border-t shrink-0 flex justify-end">
+          <button class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md text-destructive hover:bg-destructive/10" onclick={handleDelete}>
+            <Trash2 class="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       <!-- Right: Detail panel -->

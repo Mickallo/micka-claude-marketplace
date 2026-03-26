@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import Sidebar from "./components/Sidebar.svelte";
   import Header from "./components/Header.svelte";
   import PipelineBar from "./components/PipelineBar.svelte";
   import Board from "./components/Board.svelte";
@@ -125,7 +126,9 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="min-h-screen bg-background">
+<Sidebar onsettings={() => (showSettings = true)} />
+
+<div class="min-h-screen bg-background pl-12">
   <Header
     pipelines={boardData?.pipelines ?? []}
     activePipeline={boardData?.pipeline ?? ""}

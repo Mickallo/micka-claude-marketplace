@@ -61,25 +61,19 @@
 
 <header class="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
   <div class="flex h-14 items-center justify-between px-6">
-    <!-- Logo -->
-    <div class="flex items-center gap-3">
-      <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground">
-        <Sparkles class="h-4 w-4" />
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="font-semibold text-lg">AI Pipeline</span>
-        {#if pipelines.length > 1}
-          <select
-            class="text-xs text-muted-foreground px-2 py-0.5 rounded-full bg-muted border-none cursor-pointer focus:outline-none"
-            value={activePipeline}
-            onchange={(e) => onswitchpipeline((e.target as HTMLSelectElement).value)}
-          >
-            {#each pipelines as p}<option value={p}>{p}</option>{/each}
-          </select>
-        {:else}
-          <Badge variant="secondary">{activePipeline}</Badge>
-        {/if}
-      </div>
+    <!-- Pipeline selector -->
+    <div class="flex items-center gap-2">
+      {#if pipelines.length > 1}
+        <select
+          class="text-xs text-muted-foreground px-2 py-0.5 rounded-full bg-muted border-none cursor-pointer focus:outline-none"
+          value={activePipeline}
+          onchange={(e) => onswitchpipeline((e.target as HTMLSelectElement).value)}
+        >
+          {#each pipelines as p}<option value={p}>{p}</option>{/each}
+        </select>
+      {:else}
+        <Badge variant="secondary">{activePipeline}</Badge>
+      {/if}
     </div>
 
     <!-- Center -->
@@ -151,9 +145,6 @@
           </div>
         {/if}
       </div>
-      <Button variant="outline" size="icon" onclick={onsettings} title="Settings">
-        <SlidersHorizontal class="h-4 w-4" />
-      </Button>
     </div>
   </div>
 </header>
