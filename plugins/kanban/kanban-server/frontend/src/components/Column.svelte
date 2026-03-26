@@ -83,7 +83,19 @@
     ondrop={(e) => { e.preventDefault(); dragOver = false; ondrop(e, columnKey); }}
   >
     <div class="p-3 flex flex-col gap-3.5">
-      {#if tasks.length === 0}
+      {#if columnKey === "todo" && onadd}
+        <button
+          class="group w-full flex flex-col items-center justify-center py-8 rounded-lg border-2 border-dashed border-border hover:border-muted-foreground/40 transition-all"
+          onclick={onadd}
+        >
+          <div class="w-12 h-12 rounded-lg flex items-center justify-center mb-3 opacity-30 group-hover:opacity-60 transition-opacity"
+            style="background: color-mix(in oklch, var(--color-muted-foreground) 15%, transparent)">
+            <span class="text-xl font-bold text-muted-foreground">+</span>
+          </div>
+          <p class="text-sm text-muted-foreground group-hover:text-foreground transition-colors">New ticket</p>
+        </button>
+      {/if}
+      {#if tasks.length === 0 && columnKey !== "todo"}
         <div class="flex flex-col items-center justify-center py-8 text-muted-foreground">
           <div class="w-12 h-12 rounded-lg flex items-center justify-center mb-3 opacity-30"
             style={color ? `background: color-mix(in oklch, ${color} 15%, transparent); color: ${color}` : ""}>

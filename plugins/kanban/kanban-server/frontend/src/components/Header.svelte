@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { Sparkles, Plus, Layers, Bell, SlidersHorizontal, AlertCircle, Check } from "lucide-svelte";
+  import { Plus, Layers, Bell, AlertCircle, Check } from "lucide-svelte";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
+  import { cn } from "../lib/cn";
 
   interface Notification {
     id: number;
@@ -62,17 +63,19 @@
 <header class="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
   <div class="flex h-14 items-center justify-between px-6">
     <!-- Pipeline selector -->
-    <div class="flex items-center gap-2">
-      {#if pipelines.length > 1}
-        <select
-          class="text-xs text-muted-foreground px-2 py-0.5 rounded-full bg-muted border-none cursor-pointer focus:outline-none"
-          value={activePipeline}
-          onchange={(e) => onswitchpipeline((e.target as HTMLSelectElement).value)}
-        >
-          {#each pipelines as p}<option value={p}>{p}</option>{/each}
-        </select>
+    <div class="flex items-center gap-0.5 bg-secondary rounded-md p-0.5">
+      {#if pipelines.length > 0}
+        {#each pipelines as p}
+          <button
+            class={cn(
+              "px-3 py-1 text-xs rounded transition-all",
+              p === activePipeline ? "bg-card text-foreground shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
+            )}
+            onclick={() => onswitchpipeline(p)}
+          >{p}</button>
+        {/each}
       {:else}
-        <Badge variant="secondary">{activePipeline}</Badge>
+        <span class="px-3 py-1 text-xs text-muted-foreground">{activePipeline || "..."}</span>
       {/if}
     </div>
 
@@ -95,10 +98,6 @@
 
     <!-- Right -->
     <div class="flex items-center gap-2">
-      <Button size="sm" class="gap-2" onclick={onadd}>
-        <Plus class="h-4 w-4" />
-        <span class="hidden sm:inline">New Ticket</span>
-      </Button>
       <div class="relative" bind:this={dropdownRef}>
         <Button variant="outline" size="icon" class="relative" title="Notifications" onclick={() => (showDropdown = !showDropdown)}>
           <Bell class="h-4 w-4" />
