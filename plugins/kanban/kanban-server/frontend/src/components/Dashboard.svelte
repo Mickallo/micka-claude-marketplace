@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import { Loader2 } from "lucide-svelte";
-  import { Chart, ArcElement, BarElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Filler } from "chart.js";
+  import { Chart, registerables } from "chart.js";
   import { fetchDashboard } from "../lib/api";
   import type { DashboardData } from "../lib/types";
   import { cn } from "../lib/cn";
   import { formatDistanceToNow } from "../lib/time";
   import { getAgentColor } from "../lib/agents";
 
-  Chart.register(ArcElement, BarElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Filler);
+  Chart.register(...registerables);
   Chart.defaults.color = "oklch(0.65 0.02 260)";
   Chart.defaults.borderColor = "oklch(0.28 0.02 260)";
 
@@ -19,13 +19,13 @@
   let selectedPipeline = $state("");
   let selectedDays = $state(0);
 
-  let agentCanvas: HTMLCanvasElement;
+  let agentCanvas = $state<HTMLCanvasElement>(null!);
   let agentChart: Chart | null = null;
-  let modelCanvas: HTMLCanvasElement;
+  let modelCanvas = $state<HTMLCanvasElement>(null!);
   let modelChart: Chart | null = null;
-  let pipelineCanvas: HTMLCanvasElement;
+  let pipelineCanvas = $state<HTMLCanvasElement>(null!);
   let pipelineChart: Chart | null = null;
-  let timelineCanvas: HTMLCanvasElement;
+  let timelineCanvas = $state<HTMLCanvasElement>(null!);
   let timelineChart: Chart | null = null;
 
   function fmtCost(n: number): string { return "$" + n.toFixed(2); }
@@ -39,12 +39,16 @@
     return Math.round(ms / 1000) + "s";
   }
 
+  let chartTrigger = $state(0);
+
   async function loadData() {
     loading = true;
     try {
       data = await fetchDashboard(selectedPipeline || undefined, selectedDays || undefined);
     } finally {
       loading = false;
+      await tick();
+      chartTrigger++;
     }
   }
 
@@ -61,7 +65,7 @@
 
   // By Agent chart
   $effect(() => {
-    if (!agentCanvas || !data) return;
+    chartTrigger; const d = data; if (!agentCanvas || !d) return;
     if (agentChart) agentChart.destroy();
 
     const agents = Object.entries(data.byAgent);
@@ -100,7 +104,7 @@
 
   // By Model chart
   $effect(() => {
-    if (!modelCanvas || !data) return;
+    chartTrigger; const d = data; if (!modelCanvas || !d) return;
     if (modelChart) modelChart.destroy();
 
     const models = Object.entries(data.byModel);
@@ -139,64 +143,41 @@
     });
   });
 
-  // By Pipeline chart
+  // By Task chart
   $effect(() => {
-    if (!pipelineCanvas || !data) return;
+    chartTrigger; const d = data; if (!pipelineCanvas || !d) return;
     if (pipelineChart) pipelineChart.destroy();
 
-    const pipelineEntries = Object.entries(data.byPipeline);
-    const pipelineColors = [
-      "oklch(0.75 0.15 145)",
-      "oklch(0.7 0.15 45)",
-      "oklch(0.6 0.2 25)",
-    ];
+    const taskEntries = Object.entries(d.byTask).sort(([, a], [, b]) => b.cost - a.cost).slice(0, 10);
 
     pipelineChart = new Chart(pipelineCanvas, {
       type: "bar",
       data: {
-        labels: pipelineEntries.map(([name]) => name),
-        datasets: [
-          {
-            label: "Cost",
-            data: pipelineEntries.map(([, v]) => v.cost),
-            backgroundColor: pipelineColors[0],
-            borderWidth: 0,
-            borderRadius: 3,
-          },
-          {
-            label: "Tokens (k)",
-            data: pipelineEntries.map(([, v]) => v.tokens / 1000),
-            backgroundColor: pipelineColors[1],
-            borderWidth: 0,
-            borderRadius: 3,
-          },
-          {
-            label: "Runs",
-            data: pipelineEntries.map(([, v]) => v.count),
-            backgroundColor: pipelineColors[2],
-            borderWidth: 0,
-            borderRadius: 3,
-          },
-        ],
+        labels: taskEntries.map(([name]) => name),
+        datasets: [{
+          label: "Cost",
+          data: taskEntries.map(([, v]) => v.cost),
+          backgroundColor: "oklch(0.75 0.15 145)",
+          borderWidth: 0,
+          borderRadius: 3,
+        }],
       },
       options: {
         indexAxis: "y",
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: {
-            position: "bottom",
-            labels: { padding: 12, usePointStyle: true, pointStyle: "circle" },
-          },
+          legend: { display: false },
           tooltip: {
             backgroundColor: "oklch(0.2 0.02 260)",
             titleColor: "oklch(0.9 0.01 260)",
             bodyColor: "oklch(0.8 0.01 260)",
+            callbacks: { label: (ctx) => fmtCost(ctx.raw as number) },
           },
         },
         scales: {
-          x: { stacked: true, grid: { color: "oklch(0.25 0.02 260)" } },
-          y: { stacked: true, grid: { display: false } },
+          x: { grid: { color: "oklch(0.25 0.02 260)" }, ticks: { callback: (v) => fmtCost(v as number) } },
+          y: { grid: { display: false } },
         },
       },
     });
@@ -204,7 +185,7 @@
 
   // Timeline chart
   $effect(() => {
-    if (!timelineCanvas || !data) return;
+    chartTrigger; const d = data; if (!timelineCanvas || !d) return;
     if (timelineChart) timelineChart.destroy();
 
     const timeline = data.timeline;
@@ -330,9 +311,9 @@
         </div>
       </div>
 
-      <!-- By Pipeline -->
+      <!-- By Task -->
       <div class="bg-card border border-border rounded-lg p-4">
-        <div class="text-sm font-medium text-foreground mb-3">By Pipeline</div>
+        <div class="text-sm font-medium text-foreground mb-3">By Task (top 10)</div>
         <div class="h-64">
           <canvas bind:this={pipelineCanvas}></canvas>
         </div>

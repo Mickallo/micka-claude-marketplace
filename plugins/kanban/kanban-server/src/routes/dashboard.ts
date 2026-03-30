@@ -26,6 +26,7 @@ app.get("/api/dashboard", (c) => {
   const byAgent: Record<string, { cost: number; tokens: number; count: number }> = {};
   const byModel: Record<string, { cost: number; tokens: number; count: number }> = {};
   const byPipeline: Record<string, { cost: number; tokens: number; count: number }> = {};
+  const byTask: Record<string, { cost: number; tokens: number; count: number }> = {};
   const byDay: Record<string, { cost: number; tokens: number; count: number }> = {};
   const recentRuns: { taskId: number; taskTitle: string; agent: string; model: string; verdict: string; input_tokens: number; output_tokens: number; cost_usd: number; duration_ms: number; timestamp: string }[] = [];
 
@@ -34,6 +35,7 @@ app.get("/api/dashboard", (c) => {
   for (const task of tasks) {
     if (task.status === "done") tasksDone++;
     const blocks: Block[] = task.blocks ? JSON.parse(task.blocks) : [];
+    const taskLabel = `#${task.id} ${task.title.slice(0, 30)}`;
 
     for (const b of blocks) {
       if (b.verdict === "running" || b.verdict === "info") continue;
@@ -67,6 +69,11 @@ app.get("/api/dashboard", (c) => {
       byPipeline[task.pipeline].cost += cost;
       byPipeline[task.pipeline].tokens += tokens;
       byPipeline[task.pipeline].count++;
+
+      if (!byTask[taskLabel]) byTask[taskLabel] = { cost: 0, tokens: 0, count: 0 };
+      byTask[taskLabel].cost += cost;
+      byTask[taskLabel].tokens += tokens;
+      byTask[taskLabel].count++;
 
       const day = b.timestamp.slice(0, 10);
       if (!byDay[day]) byDay[day] = { cost: 0, tokens: 0, count: 0 };
@@ -108,6 +115,7 @@ app.get("/api/dashboard", (c) => {
     byAgent,
     byModel,
     byPipeline,
+    byTask,
     timeline,
     recentRuns,
   });

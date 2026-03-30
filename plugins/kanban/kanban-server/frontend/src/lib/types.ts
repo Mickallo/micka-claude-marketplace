@@ -72,6 +72,7 @@ export interface DashboardData {
   byAgent: Record<string, { cost: number; tokens: number; count: number }>;
   byModel: Record<string, { cost: number; tokens: number; count: number }>;
   byPipeline: Record<string, { cost: number; tokens: number; count: number }>;
+  byTask: Record<string, { cost: number; tokens: number; count: number }>;
   timeline: { date: string; cost: number; tokens: number; count: number }[];
   recentRuns: {
     taskId: number;
