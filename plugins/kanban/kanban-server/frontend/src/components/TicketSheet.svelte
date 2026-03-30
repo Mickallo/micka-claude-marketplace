@@ -237,7 +237,7 @@
 
     <!-- Main content: split blocks list / detail / git -->
     <div class="flex-1 flex min-h-0">
-    <div class="flex min-h-0" style={gitPanelOpen ? `width: ${100 - gitPanelWidth}%` : "flex: 1"}>
+    <div class="flex min-h-0 min-w-0 overflow-hidden" style={gitPanelOpen ? `width: ${100 - gitPanelWidth}%` : "flex: 1"}>
       <!-- Left: Blocks list -->
       <div class={cn(
         "flex flex-col border-r shrink-0 overflow-hidden transition-[width] duration-200",
@@ -505,12 +505,12 @@
 
           <!-- Tab content -->
           {#if detailTab === "content"}
-            <div class="flex-1 overflow-y-auto p-5">
-              <div class="prose prose-sm max-w-none">{@html md(selectedBlock.content)}</div>
+            <div class="flex-1 overflow-auto p-5 min-w-0">
+              <div class="prose max-w-none">{@html md(selectedBlock.content)}</div>
             </div>
           {:else if detailTab === "decision_log" && selectedBlock.decision_log}
-            <div class="flex-1 overflow-y-auto p-5">
-              <div class="prose prose-sm max-w-none text-muted-foreground">{@html md(selectedBlock.decision_log)}</div>
+            <div class="flex-1 overflow-auto p-5 min-w-0">
+              <div class="prose max-w-none text-muted-foreground">{@html md(selectedBlock.decision_log)}</div>
             </div>
           {:else if detailTab === "terminal" && terminalBlockIdx !== null && blocks[terminalBlockIdx]?.agent_id}
             <div class="flex-1 min-h-0 flex flex-col">
