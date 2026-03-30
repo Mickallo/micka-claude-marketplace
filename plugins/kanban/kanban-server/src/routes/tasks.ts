@@ -7,6 +7,7 @@ import { getDb, renumberRanks, IMAGES_DIR } from "../db.js";
 import { getPipeline, getColumns, getTransitions, loadPipelines } from "../pipelines.js";
 import { eventBus } from "../events.js";
 import type { Task, Block } from "../types.js";
+import gitRoutes from "./git.js";
 
 const app = new Hono();
 
@@ -598,5 +599,7 @@ app.post("/api/task/:id/stop", (c) => {
   runningTasks.delete(id);
   return c.json({ success: true });
 });
+
+app.route("", gitRoutes);
 
 export default app;
