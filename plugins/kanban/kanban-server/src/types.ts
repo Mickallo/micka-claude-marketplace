@@ -5,6 +5,11 @@ export interface Block {
   decision_log: string;
   verdict: "ok" | "nok" | "relay" | "running" | "info";
   timestamp: string;
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: number;
+  duration_ms?: number;
 }
 
 export interface Task {

@@ -300,7 +300,17 @@
                         )}>{block.verdict}</span>
                       {/if}
                     </div>
-                    <span class="text-[10px] text-muted-foreground">{formatDistanceToNow(block.timestamp)}</span>
+                    <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <span>{formatDistanceToNow(block.timestamp)}</span>
+                      {#if block.model}
+                        <span class="text-muted-foreground/50">·</span>
+                        <span class="truncate">{block.model.replace("claude-", "")}</span>
+                      {/if}
+                      {#if block.input_tokens || block.output_tokens}
+                        <span class="text-muted-foreground/50">·</span>
+                        <span>{Math.round(((block.input_tokens || 0) + (block.output_tokens || 0)) / 1000)}k</span>
+                      {/if}
+                    </div>
                   </div>
                 </button>
               {/each}
@@ -447,6 +457,24 @@
                   "text-[10px] px-1.5 py-0.5 rounded",
                   selectedBlock.verdict === "ok" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive"
                 )}>{selectedBlock.verdict}</span>
+              {/if}
+              {#if selectedBlock.model || selectedBlock.input_tokens}
+                <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground ml-1">
+                  {#if selectedBlock.model}
+                    <span class="px-1.5 py-0.5 rounded bg-secondary">{selectedBlock.model.replace("claude-", "")}</span>
+                  {/if}
+                  {#if selectedBlock.input_tokens || selectedBlock.output_tokens}
+                    <span>{(selectedBlock.input_tokens || 0).toLocaleString()} in · {(selectedBlock.output_tokens || 0).toLocaleString()} out</span>
+                  {/if}
+                  {#if selectedBlock.cost_usd}
+                    <span class="text-muted-foreground/50">·</span>
+                    <span>${selectedBlock.cost_usd.toFixed(3)}</span>
+                  {/if}
+                  {#if selectedBlock.duration_ms}
+                    <span class="text-muted-foreground/50">·</span>
+                    <span>{Math.round(selectedBlock.duration_ms / 1000)}s</span>
+                  {/if}
+                </div>
               {/if}
 
               <!-- Tabs -->

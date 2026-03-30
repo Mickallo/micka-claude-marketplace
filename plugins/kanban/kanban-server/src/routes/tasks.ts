@@ -490,12 +490,30 @@ app.post("/api/task/:id/dispatch", async (c) => {
       // Try to extract JSON from output (--output-format json wraps in {"type":"result",...})
       let sessionId: string | null = null;
       let parsedText = clean;
+      let model: string | undefined;
+      let inputTokens: number | undefined;
+      let outputTokens: number | undefined;
+      let costUsd: number | undefined;
+      let durationMs: number | undefined;
       const jsonMatch = clean.match(/\{["\s]*type["\s]*:["\s]*result[\s\S]*\}/);
       if (jsonMatch) {
         try {
           const json = JSON.parse(jsonMatch[0]);
           sessionId = json.session_id || null;
           parsedText = json.result || json.text || clean;
+          // Extract model and usage
+          if (json.modelUsage) {
+            const modelName = Object.keys(json.modelUsage)[0];
+            if (modelName) {
+              model = modelName;
+              const mu = json.modelUsage[modelName];
+              inputTokens = (mu.inputTokens || 0) + (mu.cacheReadInputTokens || 0) + (mu.cacheCreationInputTokens || 0);
+              outputTokens = mu.outputTokens || 0;
+              costUsd = mu.costUSD;
+            }
+          }
+          if (json.duration_ms) durationMs = json.duration_ms;
+          if (json.total_cost_usd && !costUsd) costUsd = json.total_cost_usd;
         } catch {
           // JSON parse failed — try line by line
           for (const line of clean.split("\n")) {
@@ -535,6 +553,11 @@ app.post("/api/task/:id/dispatch", async (c) => {
           lastBlock.decision_log = decisionLog;
           lastBlock.verdict = verdict;
           lastBlock.agent_id = sessionId; // Real session_id for resume
+          if (model) lastBlock.model = model;
+          if (inputTokens !== undefined) lastBlock.input_tokens = inputTokens;
+          if (outputTokens !== undefined) lastBlock.output_tokens = outputTokens;
+          if (costUsd !== undefined) lastBlock.cost_usd = costUsd;
+          if (durationMs !== undefined) lastBlock.duration_ms = durationMs;
           db.prepare("UPDATE tasks SET blocks = ? WHERE id = ?").run(JSON.stringify(blocks), id);
           eventBus.blockAdded(id, lastBlock.agent, lastBlock.verdict);
         }
