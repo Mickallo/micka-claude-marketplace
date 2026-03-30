@@ -263,6 +263,13 @@ app.post("/api/task/:id/block", async (c) => {
   blocks.push(newBlock);
 
   db.prepare("UPDATE tasks SET blocks = ? WHERE id = ?").run(JSON.stringify(blocks), id);
+
+  // Optional: force move to a specific status (bypass transition validation)
+  if (body.force_status) {
+    db.prepare("UPDATE tasks SET status = ? WHERE id = ?").run(body.force_status, id);
+    eventBus.taskMoved(id, "manual", body.force_status);
+  }
+
   eventBus.blockAdded(id, newBlock.agent, newBlock.verdict);
   return c.json({ success: true, block: newBlock, index: blocks.length - 1 });
 });

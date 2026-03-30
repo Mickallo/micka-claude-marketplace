@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { X, Clock, AlertCircle, CheckCircle, Loader2, Play, Trash2, Terminal as TerminalIcon, Copy, Check, ChevronRight } from "lucide-svelte";
+  import { X, Clock, AlertCircle, CheckCircle, Loader2, Play, Trash2, Terminal as TerminalIcon, Copy, Check, ChevronRight, Send, Plus, ArrowRightLeft } from "lucide-svelte";
   import { cn } from "../lib/cn";
   import { md } from "../lib/markdown";
   import type { Task, Block, Attachment } from "../lib/types";
-  import { fetchTask, patchTask, deleteTask, gateAction, runPipeline, stopPipeline } from "../lib/api";
+  import { fetchTask, patchTask, deleteTask, gateAction, runPipeline, stopPipeline, addBlock } from "../lib/api";
   import { parseJsonArray } from "../lib/utils";
   import TerminalView from "./Terminal.svelte";
   import GitPanel from "./GitPanel.svelte";
@@ -28,6 +28,41 @@
   let gitPanelOpen = $state(false);
   let gitPanelWidth = $state(50); // percentage
   let draggingGit = $state(false);
+  let noteText = $state("");
+  let noteSending = $state(false);
+  let showNoteEditor = $state(false);
+  let showMovePopover = $state(false);
+
+  async function handleAddNote() {
+    if (!task || !noteText.trim()) return;
+    noteSending = true;
+    try {
+      await addBlock(task.id, {
+        agent: "user",
+        content: noteText.trim(),
+        decision_log: "",
+        verdict: "info",
+      });
+      noteText = "";
+      showNoteEditor = false;
+      load();
+    } finally {
+      noteSending = false;
+    }
+  }
+
+  async function handleMoveTo(col: string) {
+    if (!task || task.status === col) return;
+    await addBlock(task.id, {
+      agent: "user",
+      content: `Moved to **${col}**`,
+      decision_log: "",
+      verdict: "info",
+      force_status: col,
+    });
+    showMovePopover = false;
+    load();
+  }
 
   function startGitDrag(e: MouseEvent) {
     e.preventDefault();
@@ -57,8 +92,8 @@
   let selectedBlock = $derived(selectedBlockIdx !== null && selectedBlockIdx >= 0 ? blocks[selectedBlockIdx] ?? null : null);
   let isActionSelected = $derived(selectedBlockIdx === -1);
   let needsAction = $derived(!!awaitingStage || isBlocked);
-  let hasDetailOpen = $derived(selectedBlock !== null || isActionSelected);
-  let detailTab: "content" | "decision_log" | "terminal" = $state("content");
+  let hasDetailOpen = $derived(selectedBlock !== null || isActionSelected || showNoteEditor);
+  let detailTab: "content" | "decision_log" | "terminal" | "stats" = $state("content");
   let canResume = $derived(
     selectedBlock !== null &&
     selectedBlock.agent_id !== null &&
@@ -96,6 +131,7 @@
   }
   function selectBlock(idx: number) {
     if (blocks[idx]?.verdict === "running") return;
+    showNoteEditor = false;
     if (selectedBlockIdx === idx) {
       selectedBlockIdx = null;
     } else {
@@ -232,6 +268,48 @@
         >
           Git
         </button>
+        <button
+          class={cn(
+            "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border transition-colors",
+            showNoteEditor ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:bg-secondary"
+          )}
+          onclick={() => { showNoteEditor = !showNoteEditor; if (showNoteEditor) { selectedBlockIdx = null; showMovePopover = false; } }}
+        >
+          <Plus class="w-3.5 h-3.5" /> Note
+        </button>
+        <div class="relative">
+          <button
+            class={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border transition-colors",
+              showMovePopover ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:bg-secondary"
+            )}
+            onclick={() => { showMovePopover = !showMovePopover; showNotePopover = false; }}
+          >
+            <ArrowRightLeft class="w-3.5 h-3.5" /> Move
+          </button>
+          {#if showMovePopover}
+            <div class="absolute top-full left-0 mt-1 w-48 bg-card border border-border rounded-lg shadow-xl py-1 z-50">
+              {#each columnOrder as col}
+                <button
+                  class={cn(
+                    "w-full text-left px-3 py-1.5 text-sm transition-colors",
+                    task?.status === col ? "text-primary bg-primary/10 font-medium" : "text-foreground hover:bg-secondary"
+                  )}
+                  disabled={task?.status === col}
+                  onclick={() => handleMoveTo(col)}
+                >
+                  {col}
+                  {#if task?.status === col}
+                    <span class="text-[10px] text-muted-foreground ml-1">(current)</span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+        <button class="inline-flex items-center px-2.5 py-1.5 text-sm font-medium rounded-md text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/30 transition-colors" onclick={handleDelete}>
+          <Trash2 class="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
 
@@ -300,17 +378,7 @@
                         )}>{block.verdict}</span>
                       {/if}
                     </div>
-                    <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                      <span>{formatDistanceToNow(block.timestamp)}</span>
-                      {#if block.model}
-                        <span class="text-muted-foreground/50">·</span>
-                        <span class="truncate">{block.model.replace("claude-", "")}</span>
-                      {/if}
-                      {#if block.input_tokens || block.output_tokens}
-                        <span class="text-muted-foreground/50">·</span>
-                        <span>{Math.round(((block.input_tokens || 0) + (block.output_tokens || 0)) / 1000)}k</span>
-                      {/if}
-                    </div>
+                    <span class="text-[10px] text-muted-foreground">{formatDistanceToNow(block.timestamp)}</span>
                   </div>
                 </button>
               {/each}
@@ -355,11 +423,6 @@
           {/if}
         </div>
 
-        <div class="p-3 border-t shrink-0 flex justify-end">
-          <button class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md text-destructive hover:bg-destructive/10" onclick={handleDelete}>
-            <Trash2 class="w-3.5 h-3.5" />
-          </button>
-        </div>
       </div>
 
       <!-- Right: Detail panel -->
@@ -458,24 +521,6 @@
                   selectedBlock.verdict === "ok" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive"
                 )}>{selectedBlock.verdict}</span>
               {/if}
-              {#if selectedBlock.model || selectedBlock.input_tokens}
-                <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground ml-1">
-                  {#if selectedBlock.model}
-                    <span class="px-1.5 py-0.5 rounded bg-secondary">{selectedBlock.model.replace("claude-", "")}</span>
-                  {/if}
-                  {#if selectedBlock.input_tokens || selectedBlock.output_tokens}
-                    <span>{(selectedBlock.input_tokens || 0).toLocaleString()} in · {(selectedBlock.output_tokens || 0).toLocaleString()} out</span>
-                  {/if}
-                  {#if selectedBlock.cost_usd}
-                    <span class="text-muted-foreground/50">·</span>
-                    <span>${selectedBlock.cost_usd.toFixed(3)}</span>
-                  {/if}
-                  {#if selectedBlock.duration_ms}
-                    <span class="text-muted-foreground/50">·</span>
-                    <span>{Math.round(selectedBlock.duration_ms / 1000)}s</span>
-                  {/if}
-                </div>
-              {/if}
 
               <!-- Tabs -->
               <div class="flex items-center gap-0.5 ml-3 bg-secondary rounded-md p-0.5">
@@ -505,6 +550,15 @@
                   >
                     <TerminalIcon class="w-3 h-3" /> Terminal
                   </button>
+                {/if}
+                {#if selectedBlock.model || selectedBlock.input_tokens}
+                  <button
+                    class={cn(
+                      "px-3 py-1 text-xs rounded transition-all",
+                      detailTab === "stats" ? "bg-card text-foreground shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
+                    )}
+                    onclick={() => (detailTab = "stats")}
+                  >Stats</button>
                 {/if}
               </div>
             </div>
@@ -552,7 +606,75 @@
                 </div>
               </div>
             </div>
+          {:else if detailTab === "stats" && selectedBlock}
+            <div class="flex-1 overflow-auto p-5 min-w-0">
+              <div class="grid grid-cols-2 gap-4 max-w-md">
+                {#if selectedBlock.model}
+                  <div class="col-span-2 flex items-center gap-2">
+                    <span class="text-xs text-muted-foreground">Model</span>
+                    <span class="text-sm font-mono font-medium px-2 py-1 rounded bg-secondary">{selectedBlock.model}</span>
+                  </div>
+                {/if}
+                {#if selectedBlock.input_tokens}
+                  <div class="flex flex-col gap-1 p-3 rounded-lg bg-secondary/50 border border-border">
+                    <span class="text-[10px] text-muted-foreground uppercase tracking-wider">Input tokens</span>
+                    <span class="text-lg font-semibold font-mono">{selectedBlock.input_tokens.toLocaleString()}</span>
+                  </div>
+                {/if}
+                {#if selectedBlock.output_tokens}
+                  <div class="flex flex-col gap-1 p-3 rounded-lg bg-secondary/50 border border-border">
+                    <span class="text-[10px] text-muted-foreground uppercase tracking-wider">Output tokens</span>
+                    <span class="text-lg font-semibold font-mono">{selectedBlock.output_tokens.toLocaleString()}</span>
+                  </div>
+                {/if}
+                {#if selectedBlock.cost_usd}
+                  <div class="flex flex-col gap-1 p-3 rounded-lg bg-secondary/50 border border-border">
+                    <span class="text-[10px] text-muted-foreground uppercase tracking-wider">Cost</span>
+                    <span class="text-lg font-semibold font-mono">${selectedBlock.cost_usd.toFixed(4)}</span>
+                  </div>
+                {/if}
+                {#if selectedBlock.duration_ms}
+                  <div class="flex flex-col gap-1 p-3 rounded-lg bg-secondary/50 border border-border">
+                    <span class="text-[10px] text-muted-foreground uppercase tracking-wider">Duration</span>
+                    <span class="text-lg font-semibold font-mono">{selectedBlock.duration_ms >= 60000 ? `${Math.floor(selectedBlock.duration_ms / 60000)}m ${Math.round((selectedBlock.duration_ms % 60000) / 1000)}s` : `${Math.round(selectedBlock.duration_ms / 1000)}s`}</span>
+                  </div>
+                {/if}
+              </div>
+            </div>
           {/if}
+        </div>
+      {/if}
+      {#if showNoteEditor}
+        <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <div class="flex items-center justify-between px-4 py-2 border-b bg-card shrink-0">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0 bg-muted text-muted-foreground text-xs font-bold">U</div>
+              <span class="font-medium text-sm">New Note</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+                disabled={!noteText.trim() || noteSending}
+                onclick={handleAddNote}
+              >
+                <Send class="w-3 h-3" /> Send
+              </button>
+              <button
+                class="w-7 h-7 rounded-md flex items-center justify-center hover:bg-secondary"
+                onclick={() => (showNoteEditor = false)}
+              >
+                <X class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+          <div class="flex-1 min-h-0 p-4">
+            <textarea
+              class="w-full h-full px-4 py-3 text-sm rounded-lg bg-secondary border border-border resize-none placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
+              placeholder="Write your note here... (Cmd+Enter to send)"
+              bind:value={noteText}
+              onkeydown={(e) => { if (e.key === "Enter" && e.metaKey) handleAddNote(); }}
+            ></textarea>
+          </div>
         </div>
       {/if}
     </div>

@@ -44,7 +44,7 @@ export async function reorderTask(id: number, data: { status?: string; afterId?:
   });
 }
 
-export async function addBlock(taskId: number, block: { agent: string; agent_id?: string; content: string; decision_log: string; verdict: string }): Promise<void> {
+export async function addBlock(taskId: number, block: { agent: string; agent_id?: string; content: string; decision_log: string; verdict: string; force_status?: string }): Promise<void> {
   await fetch(`/api/task/${taskId}/block`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
