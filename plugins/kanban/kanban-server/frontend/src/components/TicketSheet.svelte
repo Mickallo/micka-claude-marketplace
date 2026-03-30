@@ -7,6 +7,7 @@
   import { fetchTask, patchTask, deleteTask, gateAction, runPipeline, stopPipeline } from "../lib/api";
   import { parseJsonArray } from "../lib/utils";
   import TerminalView from "./Terminal.svelte";
+  import GitPanel from "./GitPanel.svelte";
   import { formatDistanceToNow } from "../lib/time";
   import { getAgentColor } from "../lib/agents";
   import { onSSE } from "../lib/sse";
@@ -24,6 +25,29 @@
   let selectedBlockIdx: number | null = $state(null);
   let terminalBlockIdx: number | null = $state(null);
   let copied = $state<number | null>(null);
+  let gitPanelOpen = $state(false);
+  let gitPanelWidth = $state(50); // percentage
+  let draggingGit = $state(false);
+
+  function startGitDrag(e: MouseEvent) {
+    e.preventDefault();
+    draggingGit = true;
+    const container = (e.target as HTMLElement).closest(".flex-1.flex.min-h-0") as HTMLElement;
+    if (!container) return;
+
+    function onMove(ev: MouseEvent) {
+      const rect = container.getBoundingClientRect();
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      gitPanelWidth = Math.max(20, Math.min(80, 100 - pct));
+    }
+    function onUp() {
+      draggingGit = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
 
   let blocks = $derived(task ? parseJsonArray<Block>(task.blocks) : []);
   let attachments = $derived(task ? parseJsonArray<Attachment>(task.attachments) : []);
@@ -95,7 +119,7 @@
 <!-- Sheet from right — widens when a block is selected -->
 <div class={cn(
   "fixed inset-y-0 right-0 z-50 flex flex-col bg-background border-l shadow-xl animate-slide-in transition-[max-width] duration-200",
-  hasDetailOpen ? "w-full max-w-6xl" : "w-full sm:max-w-xl md:max-w-2xl"
+  gitPanelOpen ? "w-full max-w-[100vw]" : hasDetailOpen ? "w-full max-w-6xl" : "w-full sm:max-w-xl md:max-w-2xl"
 )}>
   {#if !task}
     <div class="flex-1 flex items-center justify-center text-muted-foreground">
@@ -199,11 +223,21 @@
             <Play class="w-3.5 h-3.5" /> Run Pipeline
           </button>
         {/if}
+        <button
+          class={cn(
+            "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border transition-colors",
+            gitPanelOpen ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:bg-secondary"
+          )}
+          onclick={() => (gitPanelOpen = !gitPanelOpen)}
+        >
+          Git
+        </button>
       </div>
     </div>
 
-    <!-- Main content: split blocks list / detail -->
+    <!-- Main content: split blocks list / detail / git -->
     <div class="flex-1 flex min-h-0">
+    <div class="flex min-h-0" style={gitPanelOpen ? `width: ${100 - gitPanelWidth}%` : "flex: 1"}>
       <!-- Left: Blocks list -->
       <div class={cn(
         "flex flex-col border-r shrink-0 overflow-hidden transition-[width] duration-200",
@@ -493,6 +527,22 @@
           {/if}
         </div>
       {/if}
+    </div>
+    {#if gitPanelOpen && task}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class={cn(
+          "w-1 shrink-0 cursor-col-resize hover:bg-primary/30 transition-colors relative",
+          draggingGit && "bg-primary/40"
+        )}
+        onmousedown={startGitDrag}
+      >
+        <div class="absolute inset-y-0 -left-1.5 -right-1.5"></div>
+      </div>
+      <div class="min-h-0" style="width: {gitPanelWidth}%">
+        <GitPanel taskId={task.id} onclose={() => (gitPanelOpen = false)} />
+      </div>
+    {/if}
     </div>
   {/if}
 </div>

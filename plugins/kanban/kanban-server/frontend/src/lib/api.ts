@@ -1,4 +1,4 @@
-import type { Task, BoardResponse, PipelinesFile, AgentInfo } from "./types.js";
+import type { Task, BoardResponse, PipelinesFile, AgentInfo, GitInfo } from "./types.js";
 
 const BASE = "";
 
@@ -95,4 +95,12 @@ export async function runPipeline(taskId: number): Promise<{ success: boolean; p
 
 export async function stopPipeline(taskId: number): Promise<{ success: boolean; error?: string }> {
   return json(`/api/task/${taskId}/stop`, { method: "POST" });
+}
+
+export async function fetchGitInfo(taskId: number): Promise<GitInfo> {
+  return json(`/api/task/${taskId}/git`);
+}
+
+export async function fetchCommitDiff(taskId: number, hash: string): Promise<{ diff: string }> {
+  return json(`/api/task/${taskId}/git/commit/${hash}`);
 }

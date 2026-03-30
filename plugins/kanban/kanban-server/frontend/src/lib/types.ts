@@ -54,3 +54,17 @@ export interface AgentInfo {
   tools?: string[];
   prompt?: string;
 }
+
+export interface GitCommit {
+  hash: string;
+  short: string;
+  message: string;
+  date: string;
+  author: string;
+}
+
+export interface GitInfo {
+  branch: string;
+  commits: GitCommit[];
+  diff: string;
+}
