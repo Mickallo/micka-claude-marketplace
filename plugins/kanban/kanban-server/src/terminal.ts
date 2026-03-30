@@ -51,11 +51,11 @@ export function spawnTerminal(opts: {
   onFinish?: (output: string, exitCode: number) => void;
 }): SpawnResult {
   const terminalId = genId();
-  const cwd = opts.cwd || process.env.KANBAN_PROJECTS_ROOT;
+  const cwd = opts.cwd || process.env.KANBAN_PROJECT_ROOT;
   if (!cwd) {
-    const session: TerminalSession = { id: terminalId, clients: new Set(), ptyProcess: null, output: "[Error: KANBAN_PROJECTS_ROOT not set]\r\n", finished: true };
+    const session: TerminalSession = { id: terminalId, clients: new Set(), ptyProcess: null, output: "[Error: KANBAN_PROJECT_ROOT not set]\r\n", finished: true };
     sessions.set(terminalId, session);
-    opts.onFinish?.("[Error: KANBAN_PROJECTS_ROOT not set]", 1);
+    opts.onFinish?.("[Error: KANBAN_PROJECT_ROOT not set]", 1);
     return { terminalId };
   }
 
@@ -182,6 +182,11 @@ export function setupTerminalWS(server: Server) {
           const newSession = sessions.get(newId);
           if (newSession) {
             newSession.clients.add(ws);
+            // Send buffered output (e.g. if session finished before client connected)
+            if (newSession.output) ws.send(newSession.output);
+            if (newSession.finished) {
+              ws.send("\r\n\x1b[90m[Session already ended]\x1b[0m\r\n");
+            }
             ws.on("message", (data: Buffer | string) => {
               const msg = data.toString();
               if (newSession.ptyProcess && !newSession.finished) {

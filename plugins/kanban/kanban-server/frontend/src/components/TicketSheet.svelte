@@ -479,9 +479,15 @@
               <div class="prose prose-sm max-w-none text-muted-foreground">{@html md(selectedBlock.decision_log)}</div>
             </div>
           {:else if detailTab === "terminal" && terminalBlockIdx !== null && blocks[terminalBlockIdx]?.agent_id}
-            <div class="flex-1 min-h-0 relative">
-              <div class="absolute inset-0">
-                <TerminalView id={blocks[terminalBlockIdx].agent_id!} />
+            <div class="flex-1 min-h-0 flex flex-col">
+              <div class="px-4 py-1.5 border-b bg-secondary/50 flex items-center gap-2 shrink-0">
+                <span class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Command</span>
+                <code class="text-xs font-mono text-foreground/80 select-all">claude --resume {blocks[terminalBlockIdx].agent_id}</code>
+              </div>
+              <div class="flex-1 min-h-0 relative">
+                <div class="absolute inset-0">
+                  <TerminalView id={blocks[terminalBlockIdx].agent_id!} />
+                </div>
               </div>
             </div>
           {/if}
