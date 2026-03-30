@@ -60,6 +60,33 @@ export interface AgentInfo {
   prompt?: string;
 }
 
+export interface DashboardData {
+  totalCost: number;
+  totalTokens: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  tasksDone: number;
+  tasksTotal: number;
+  avgDuration: number;
+  blockCount: number;
+  byAgent: Record<string, { cost: number; tokens: number; count: number }>;
+  byModel: Record<string, { cost: number; tokens: number; count: number }>;
+  byPipeline: Record<string, { cost: number; tokens: number; count: number }>;
+  timeline: { date: string; cost: number; tokens: number; count: number }[];
+  recentRuns: {
+    taskId: number;
+    taskTitle: string;
+    agent: string;
+    model: string;
+    verdict: string;
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+    duration_ms: number;
+    timestamp: string;
+  }[];
+}
+
 export interface GitCommit {
   hash: string;
   short: string;

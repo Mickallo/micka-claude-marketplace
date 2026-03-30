@@ -8,6 +8,7 @@ import { getPipeline, getColumns, getTransitions, loadPipelines } from "../pipel
 import { eventBus } from "../events.js";
 import type { Task, Block } from "../types.js";
 import gitRoutes from "./git.js";
+import dashboardRoutes from "./dashboard.js";
 
 const app = new Hono();
 
@@ -631,5 +632,6 @@ app.post("/api/task/:id/stop", (c) => {
 });
 
 app.route("", gitRoutes);
+app.route("", dashboardRoutes);
 
 export default app;

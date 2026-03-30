@@ -7,10 +7,12 @@
   import TicketSheet from "./components/TicketSheet.svelte";
   import AddCardModal from "./components/AddCardModal.svelte";
   import PipelineSettings from "./components/PipelineSettings.svelte";
+  import Dashboard from "./components/Dashboard.svelte";
   import { fetchBoard, fetchPipelines, fetchAgents } from "./lib/api";
   import { connectSSE, onSSE, disconnectSSE } from "./lib/sse";
   import type { BoardResponse, AgentInfo } from "./lib/types";
 
+  let activePage = $state("board");
   let currentPipeline = $state(localStorage.getItem("kanban-pipeline") || "");
   let maxLoops = $state(3);
   let boardData: BoardResponse | null = $state(null);
@@ -126,51 +128,58 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<Sidebar onsettings={() => (showSettings = true)} />
+<Sidebar {activePage} onnavigate={(p) => (activePage = p)} onsettings={() => (showSettings = true)} />
 
 <div class="min-h-screen bg-background pl-12">
-  <Header
-    pipelines={boardData?.pipelines ?? []}
-    activePipeline={boardData?.pipeline ?? ""}
-    totalTickets={stats().total}
-    processingCount={stats().processing}
-    {notifications}
-    onswitchpipeline={switchPipeline}
-    onadd={() => (showAddCard = true)}
-    onsettings={() => (showSettings = true)}
-    onnotificationclick={(taskId, notifId) => { selectedTaskId = taskId; markNotifRead(notifId); }}
-    onmarkallread={markAllRead}
-  />
-
-  <PipelineBar
-    columnOrder={boardData?.column_order ?? []}
-    stats={stats()}
-  />
-
-  <main class="py-6">
-    <Board
-      data={boardData}
-      {maxLoops}
-      {agentMap}
-      onselect={(id) => (selectedTaskId = id)}
+  {#if activePage === "board"}
+    <Header
+      pipelines={boardData?.pipelines ?? []}
+      activePipeline={boardData?.pipeline ?? ""}
+      totalTickets={stats().total}
+      processingCount={stats().processing}
+      {notifications}
+      onswitchpipeline={switchPipeline}
       onadd={() => (showAddCard = true)}
-      onreorder={loadBoard}
+      onsettings={() => (showSettings = true)}
+      onnotificationclick={(taskId, notifId) => { selectedTaskId = taskId; markNotifRead(notifId); }}
+      onmarkallread={markAllRead}
     />
-  </main>
 
-  {#if selectedTaskId !== null}
-    <TicketSheet
-      taskId={selectedTaskId}
+    <PipelineBar
       columnOrder={boardData?.column_order ?? []}
-      {maxLoops}
-      onclose={() => { selectedTaskId = null; loadBoard(); }}
+      stats={stats()}
     />
-  {/if}
 
-  {#if showAddCard}
-    <AddCardModal
-      pipeline={currentPipeline}
-      onclose={() => { showAddCard = false; loadBoard(); }}
+    <main class="py-6">
+      <Board
+        data={boardData}
+        {maxLoops}
+        {agentMap}
+        onselect={(id) => (selectedTaskId = id)}
+        onadd={() => (showAddCard = true)}
+        onreorder={loadBoard}
+      />
+    </main>
+
+    {#if selectedTaskId !== null}
+      <TicketSheet
+        taskId={selectedTaskId}
+        columnOrder={boardData?.column_order ?? []}
+        {maxLoops}
+        onclose={() => { selectedTaskId = null; loadBoard(); }}
+      />
+    {/if}
+
+    {#if showAddCard}
+      <AddCardModal
+        pipeline={currentPipeline}
+        onclose={() => { showAddCard = false; loadBoard(); }}
+      />
+    {/if}
+  {:else if activePage === "dashboard"}
+    <Dashboard
+      pipelines={boardData?.pipelines ?? []}
+      activePipeline={boardData?.pipeline ?? ""}
     />
   {/if}
 
