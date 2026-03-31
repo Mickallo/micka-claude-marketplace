@@ -9,6 +9,7 @@
   let data: GitHubData | null = $state(null);
   let loading = $state(true);
   let refreshing = $state(false);
+  let myTab: "prs" | "drafts" = $state("prs");
   let pollInterval: ReturnType<typeof setInterval> | null = null;
 
   function ciColor(status: string | null | undefined): string {
@@ -115,17 +116,13 @@
     </div>
   {:else if data}
     <!-- KPI Cards -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="grid grid-cols-3 gap-3">
       <div class="bg-card border border-border rounded-lg p-3.5 text-center">
         <div class="text-2xl font-bold font-mono" style="color:#f0883e">{data.stats.reviewCount}</div>
         <div class="text-[9px] text-muted-foreground uppercase tracking-wider mt-0.5">To Review</div>
       </div>
       <div class="bg-card border border-border rounded-lg p-3.5 text-center">
-        <div class="text-2xl font-bold font-mono" style="color:#a371f7">{data.stats.assignedCount}</div>
-        <div class="text-[9px] text-muted-foreground uppercase tracking-wider mt-0.5">Assigned</div>
-      </div>
-      <div class="bg-card border border-border rounded-lg p-3.5 text-center">
-        <div class="text-2xl font-bold font-mono" style="color:#58a6ff">{data.stats.authoredCount}</div>
+        <div class="text-2xl font-bold font-mono" style="color:#58a6ff">{data.stats.authoredCount + data.stats.assignedCount}</div>
         <div class="text-[9px] text-muted-foreground uppercase tracking-wider mt-0.5">My PRs</div>
       </div>
       <div class="bg-card border border-border rounded-lg p-3.5 text-center">
@@ -134,56 +131,79 @@
       </div>
     </div>
 
-    <!-- 3-Column Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+    <!-- 2-Column Grid -->
+    {@const allMyPrs = [...data.authored, ...data.assigned]}
+    {@const myPrsOnly = allMyPrs.filter(pr => !pr.isDraft)}
+    {@const myDrafts = allMyPrs.filter(pr => pr.isDraft)}
+    {@const myFiltered = myTab === "prs" ? myPrsOnly : myDrafts}
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
       {#each [
-        { title: "Needs Review", color: "#f0883e", prs: data.review, showAuthor: true },
-        { title: "Assigned", color: "#a371f7", prs: data.assigned, showAuthor: true },
-        { title: "My PRs", color: "#58a6ff", prs: data.authored, showAuthor: false },
+        { title: "Needs Review", color: "#f0883e", prs: data.review, showAuthor: true, tabs: false },
+        { title: "My PRs", color: "#58a6ff", prs: myFiltered, showAuthor: false, tabs: true },
       ] as column}
         <div>
-          <div
-            class="text-xs font-semibold mb-2 px-2.5 py-1.5"
-            style="color:{column.color};border-bottom:2px solid {column.color}"
-          >
-            {column.title} ({column.prs.length})
-          </div>
+          {#if column.tabs}
+            <div class="flex gap-0 mb-2" style="border-bottom:2px solid #30363d">
+              <button
+                class="text-xs font-semibold px-2.5 py-1.5 transition-colors"
+                style={myTab === "prs" ? "color:#58a6ff;border-bottom:2px solid #58a6ff;margin-bottom:-2px" : "color:#8b949e"}
+                onclick={() => myTab = "prs"}
+              >
+                My PRs ({myPrsOnly.length})
+              </button>
+              <button
+                class="text-xs font-semibold px-2.5 py-1.5 transition-colors"
+                style={myTab === "drafts" ? "color:#a371f7;border-bottom:2px solid #a371f7;margin-bottom:-2px" : "color:#8b949e"}
+                onclick={() => myTab = "drafts"}
+              >
+                My Drafts ({myDrafts.length})
+              </button>
+            </div>
+          {:else}
+            <div
+              class="text-xs font-semibold mb-2 px-2.5 py-1.5"
+              style="color:{column.color};border-bottom:2px solid {column.color}"
+            >
+              {column.title} ({column.prs.length})
+            </div>
+          {/if}
           <div class="flex flex-col gap-1.5">
             {#each column.prs as pr}
               <a
                 href={pr.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                class="block bg-card border border-border rounded-lg p-2.5 hover:bg-secondary/50 transition-colors no-underline"
+                class="block bg-card border border-l-[3px] border-border rounded-lg p-3 hover:bg-secondary/50 transition-colors no-underline"
+                style="border-left-color: {overallCiColor(pr.checks)}"
               >
                 <!-- Row 1: CI dot + repo + PR number + draft badge + age -->
-                <div class="flex items-center gap-1.5 mb-1">
-                  <span class="text-xs" style="color:{overallCiColor(pr.checks)}">{"\u25CF"}</span>
-                  <span class="text-[9px] text-muted-foreground">{pr.repo}</span>
-                  <span class="text-[9px]" style="color:#58a6ff">#{pr.number}</span>
+                <div class="flex items-center gap-2 mb-1.5">
+                  <span class="text-sm" style="color:{overallCiColor(pr.checks)}">{"\u25CF"}</span>
+                  <span class="text-xs text-muted-foreground">{pr.repo}</span>
+                  <span class="text-xs" style="color:#58a6ff">#{pr.number}</span>
                   {#if pr.isDraft}
-                    <span class="text-[7px] bg-secondary text-muted-foreground px-1.5 py-px rounded-full">DRAFT</span>
+                    <span class="text-[10px] bg-secondary text-muted-foreground px-2 py-0.5 rounded-full">DRAFT</span>
                   {/if}
-                  <span class="ml-auto text-[8px] text-muted-foreground">{shortAge(pr.createdAt)}</span>
+                  <span class="ml-auto text-[11px] text-muted-foreground">{shortAge(pr.createdAt)}</span>
                 </div>
                 <!-- Row 2: Title -->
-                <div class="text-[11px] font-medium text-foreground mb-1 leading-tight">{pr.title}</div>
+                <div class="text-sm font-medium text-foreground mb-1.5 leading-snug">{pr.title}</div>
                 <!-- Row 3: Labels + author + diff + comments -->
-                <div class="flex items-center gap-1 flex-wrap mb-1">
+                <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
                   {#each pr.labels as label}
                     <span
-                      class="text-[8px] px-1.5 py-px rounded-full"
+                      class="text-[11px] px-2 py-0.5 rounded-full"
                       style="background:#{label.color}22;color:#{label.color}"
                     >{label.name}</span>
                   {/each}
                   {#if column.showAuthor}
-                    <span class="text-[8px] text-muted-foreground">@{pr.author}</span>
+                    <span class="text-[11px] text-muted-foreground">@{pr.author}</span>
                   {/if}
-                  <span class="text-[8px]">
+                  <span class="text-[11px]">
                     <span style="color:#3fb950">+{pr.additions}</span><span style="color:#f85149">-{pr.deletions}</span>
                   </span>
                   {#if pr.commentCount > 0}
-                    <span class="text-[8px] text-muted-foreground">{pr.commentCount} msg</span>
+                    <span class="text-[11px] text-muted-foreground">{pr.commentCount} msg</span>
                   {/if}
                 </div>
                 <!-- Row 4: CI checks -->
@@ -191,7 +211,7 @@
                   <div class="flex items-center gap-1 flex-wrap">
                     {#each pr.checks as check}
                       <span
-                        class="text-[7px] px-1 py-px rounded"
+                        class="text-[10px] px-1.5 py-0.5 rounded"
                         style="background:{ciColor(check.status)}15;color:{ciColor(check.status)}"
                       >{check.name} {ciIcon(check.status)}</span>
                     {/each}
@@ -199,10 +219,10 @@
                 {/if}
                 <!-- Row 5: Reviewers -->
                 {#if pr.reviews.length > 0}
-                  <div class="flex items-center gap-1 flex-wrap mt-0.5">
+                  <div class="flex items-center gap-1 flex-wrap mt-1">
                     {#each pr.reviews as review}
                       <span
-                        class="text-[7px] px-1 py-px rounded"
+                        class="text-[10px] px-1.5 py-0.5 rounded"
                         style="background:{reviewColor(review.state)}15;color:{reviewColor(review.state)}"
                       >@{review.author} {reviewIcon(review.state)}</span>
                     {/each}

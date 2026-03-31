@@ -34,7 +34,7 @@ interface GhPRNode {
   createdAt: string;
   updatedAt: string;
   author: { login: string };
-  repository: { nameWithOwner: string };
+  repository: { nameWithOwner: string; isArchived: boolean };
   labels: { nodes: GhLabel[] };
   comments: { totalCount: number };
   statusCheckRollup: {
@@ -51,9 +51,10 @@ interface GhPRNode {
 
 interface GhSearchResult {
   data: {
-    search: {
-      nodes: GhPRNode[];
-    };
+    search?: { nodes: GhPRNode[] };
+    authored?: { nodes: GhPRNode[] };
+    review?: { nodes: GhPRNode[] };
+    assigned?: { nodes: GhPRNode[] };
   };
 }
 
@@ -96,7 +97,7 @@ const PR_FIELDS = `
   createdAt
   updatedAt
   author { login }
-  repository { nameWithOwner }
+  repository { nameWithOwner isArchived }
   labels(first: 20) { nodes { name color } }
   comments { totalCount }
   statusCheckRollup {
@@ -112,16 +113,13 @@ const PR_FIELDS = `
   reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } }
 `;
 
-function buildQuery(qualifier: string): string {
+function buildCombinedQuery(user: string): string {
+  const frag = `nodes { ... on PullRequest { ${PR_FIELDS} } }`;
   return `
     query {
-      search(query: "is:pr is:open ${qualifier}", type: ISSUE, first: 50) {
-        nodes {
-          ... on PullRequest {
-            ${PR_FIELDS}
-          }
-        }
-      }
+      authored: search(query: "is:pr is:open author:${user}", type: ISSUE, first: 50) { ${frag} }
+      review: search(query: "is:pr is:open review-requested:${user}", type: ISSUE, first: 50) { ${frag} }
+      assigned: search(query: "is:pr is:open assignee:${user}", type: ISSUE, first: 50) { ${frag} }
     }
   `;
 }
@@ -249,15 +247,10 @@ app.get("/api/github", (c) => {
     return c.json({ error: "gh CLI not authenticated" }, 401);
   }
 
-  // Run all three queries
-  let authoredResult: GhSearchResult | null = null;
-  let reviewResult: GhSearchResult | null = null;
-  let assignedResult: GhSearchResult | null = null;
-
+  // Single combined query with aliases
+  let result: GhSearchResult | null = null;
   try {
-    authoredResult = gh(buildQuery("author:@me"));
-    reviewResult = gh(buildQuery("review-requested:@me"));
-    assignedResult = gh(buildQuery("assignee:@me"));
+    result = gh(buildCombinedQuery(user));
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg === "gh_not_authenticated") {
@@ -266,10 +259,11 @@ app.get("/api/github", (c) => {
     return c.json({ error: "Failed to fetch GitHub data" }, 500);
   }
 
-  // Transform nodes
-  const authoredNodes = authoredResult?.data?.search?.nodes ?? [];
-  const reviewNodes = reviewResult?.data?.search?.nodes ?? [];
-  const assignedNodes = assignedResult?.data?.search?.nodes ?? [];
+  // Transform nodes (filter out archived repos)
+  const notArchived = (n: GhPRNode) => !n.repository?.isArchived;
+  const authoredNodes = (result?.data?.authored?.nodes ?? []).filter(notArchived);
+  const reviewNodes = (result?.data?.review?.nodes ?? []).filter(notArchived);
+  const assignedNodes = (result?.data?.assigned?.nodes ?? []).filter(notArchived);
 
   const authoredPRs = authoredNodes.map(transformPR);
 
