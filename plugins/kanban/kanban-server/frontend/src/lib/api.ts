@@ -1,4 +1,4 @@
-import type { Task, BoardResponse, PipelinesFile, AgentInfo, GitInfo, DashboardData } from "./types.js";
+import type { Task, BoardResponse, PipelinesFile, AgentInfo, GitInfo, DashboardData, GitHubData } from "./types.js";
 
 const BASE = "";
 
@@ -111,4 +111,9 @@ export async function fetchDashboard(pipeline?: string, days?: number): Promise<
   if (days) params.set("days", String(days));
   const qs = params.toString();
   return json(`/api/dashboard${qs ? `?${qs}` : ""}`);
+}
+
+export async function fetchGitHub(force?: boolean): Promise<GitHubData> {
+  const params = force ? "?force=true" : "";
+  return json(`/api/github${params}`);
 }

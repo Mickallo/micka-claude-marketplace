@@ -101,3 +101,34 @@ export interface GitInfo {
   commits: GitCommit[];
   diff: string;
 }
+
+export interface GitHubPR {
+  repo: string;
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+  isDraft: boolean;
+  labels: { name: string; color: string }[];
+  additions: number;
+  deletions: number;
+  commentCount: number;
+  createdAt: string;
+  updatedAt: string;
+  checks: { name: string; status: string }[];
+  reviews: { author: string; state: string }[];
+}
+
+export interface GitHubData {
+  user: string;
+  lastSync: string;
+  review: GitHubPR[];
+  assigned: GitHubPR[];
+  authored: GitHubPR[];
+  stats: {
+    reviewCount: number;
+    assignedCount: number;
+    authoredCount: number;
+    ciPassRate: number;
+  };
+}
