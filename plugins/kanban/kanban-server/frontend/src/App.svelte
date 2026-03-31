@@ -8,6 +8,7 @@
   import AddCardModal from "./components/AddCardModal.svelte";
   import PipelineSettings from "./components/PipelineSettings.svelte";
   import Dashboard from "./components/Dashboard.svelte";
+  import GitHubBoard from "./components/GitHubBoard.svelte";
   import { fetchBoard, fetchPipelines, fetchAgents } from "./lib/api";
   import { connectSSE, onSSE, disconnectSSE } from "./lib/sse";
   import type { BoardResponse, AgentInfo } from "./lib/types";
@@ -181,6 +182,8 @@
       pipelines={boardData?.pipelines ?? []}
       activePipeline={boardData?.pipeline ?? ""}
     />
+  {:else if activePage === "github"}
+    <GitHubBoard />
   {/if}
 
   {#if showSettings}
