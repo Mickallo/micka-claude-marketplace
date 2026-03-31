@@ -28,7 +28,7 @@ interface TerminalSession {
   ptyProcess: ReturnType<typeof import("node-pty").spawn> | null;
   output: string;
   finished: boolean;
-  onFinish?: (output: string, exitCode: number) => void;
+  onFinish?: (output: string, exitCode: number, stderr?: string) => void;
 }
 
 const sessions = new Map<string, TerminalSession>();
@@ -48,7 +48,7 @@ export function spawnTerminal(opts: {
   args: string[];
   cwd?: string;
   interactive?: boolean;  // true = PTY (for resume), false = child_process (for dispatch)
-  onFinish?: (output: string, exitCode: number) => void;
+  onFinish?: (output: string, exitCode: number, stderr?: string) => void;
 }): SpawnResult {
   const terminalId = genId();
   const cwd = opts.cwd || process.env.KANBAN_PROJECT_ROOT;
@@ -88,10 +88,10 @@ export function spawnTerminal(opts: {
       opts.onFinish?.(`Error: ${err.message}`, 1);
     });
     proc.on("close", (code) => {
-      console.log(`[term ${terminalId}] exit code=${code} stdout=${stdout.length} bytes`);
+      console.log(`[term ${terminalId}] exit code=${code} stdout=${stdout.length} bytes stderr=${stderr.length} bytes`);
       session.finished = true;
       session.output = stdout;
-      opts.onFinish?.(stdout, code ?? 1);
+      opts.onFinish?.(stdout, code ?? 1, stderr);
     });
 
     return { terminalId };
@@ -150,7 +150,7 @@ export function spawnAgent(opts: {
   args: string[];
   cwd?: string;
   interactive?: boolean;
-  onFinish: (output: string, exitCode: number) => void;
+  onFinish: (output: string, exitCode: number, stderr?: string) => void;
 }): SpawnResult {
   return spawnTerminal(opts);
 }

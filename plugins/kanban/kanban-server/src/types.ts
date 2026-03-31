@@ -10,6 +10,7 @@ export interface Block {
   output_tokens?: number;
   cost_usd?: number;
   duration_ms?: number;
+  terminal?: string;
 }
 
 export interface Task {

@@ -485,7 +485,7 @@ app.post("/api/task/:id/dispatch", async (c) => {
   const { terminalId } = spawnAgent({
     args,
     interactive: false,  // child_process for clean JSON output
-    onFinish: (output, exitCode) => {
+    onFinish: (output, exitCode, stderr) => {
       // Strip ANSI escape codes and control chars
       const clean = output
         .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
@@ -551,6 +551,12 @@ app.post("/api/task/:id/dispatch", async (c) => {
       const content = contentMatch ? contentMatch[1].trim() : parsedText.slice(0, 5000);
       const decisionLog = decisionMatch ? decisionMatch[1].trim() : "";
 
+      if (!content && stderr) {
+        console.warn(`[dispatch ${id}] Agent ${agent} produced empty content. stderr: ${stderr.slice(0, 500)}`);
+      } else if (!content) {
+        console.warn(`[dispatch ${id}] Agent ${agent} produced empty content with exit code ${exitCode}`);
+      }
+
       // Update the running block with session_id for resume
       const taskNow = db.prepare("SELECT blocks FROM tasks WHERE id = ?").get(id) as { blocks: string | null } | undefined;
       if (taskNow) {
@@ -561,6 +567,7 @@ app.post("/api/task/:id/dispatch", async (c) => {
           lastBlock.decision_log = decisionLog;
           lastBlock.verdict = verdict;
           lastBlock.agent_id = sessionId; // Real session_id for resume
+          if (stderr) lastBlock.terminal = stderr;
           if (model) lastBlock.model = model;
           if (inputTokens !== undefined) lastBlock.input_tokens = inputTokens;
           if (outputTokens !== undefined) lastBlock.output_tokens = outputTokens;
