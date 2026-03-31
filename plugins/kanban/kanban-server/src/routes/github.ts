@@ -130,11 +130,12 @@ function buildQuery(qualifier: string): string {
 
 function gh(query: string): GhSearchResult | null {
   try {
-    const json = execSync(`gh api graphql -f query=${JSON.stringify(query)}`, {
+    const raw = execSync("gh api graphql --input -", {
       encoding: "utf-8",
       timeout: 30000,
+      input: JSON.stringify({ query }),
     }).trim();
-    return JSON.parse(json) as GhSearchResult;
+    return JSON.parse(raw) as GhSearchResult;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("not logged") || msg.includes("401") || msg.includes("authentication")) {
