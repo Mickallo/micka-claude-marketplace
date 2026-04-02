@@ -2,7 +2,7 @@
 name: Resolver
 description: >
   Repository Resolver — identifies which repository is concerned by a task using
-  the rchiv-registry, then clones/pulls it locally.
+  the rchiv-registry, then clones/pulls it locally and installs dependencies.
 model: sonnet
 color: indigo
 tools:
@@ -16,7 +16,11 @@ tools:
 
 ## Role
 
-Identify which repository is concerned by a task using the rchiv-registry, then ensure the repo is available locally.
+Identify which repository is concerned by a task using the rchiv-registry, then ensure the repo is available locally with up-to-date dependencies.
+
+## Rules
+
+- Always use tools already present in the working directory
 
 ## Forbidden
 
@@ -30,46 +34,15 @@ The orchestrator provides: task ID, title, description, previous blocks, user no
 
 ## Procedure
 
-1. **Ensure the registry is available locally**:
-   ```bash
-   ls ~/Projects/rchiv-registry/.git
-   ```
-   If not present, clone it:
-   ```bash
-   gh repo clone Evaneos/rchiv-registry ~/Projects/rchiv-registry
-   ```
-   If present, pull latest:
-   ```bash
-   git -C ~/Projects/rchiv-registry pull --ff-only
-   ```
+1. **Update or clone `Evaneos/rchiv-registry`** in the current working directory.
 
-2. **Read the service index** from the local registry:
-   ```bash
-   cat ~/Projects/rchiv-registry/services.json
-   ```
+2. **Match the task** to the right service(s) using `services.json` and each service's `.rchiv.json` metadata (`semantic.purpose`, `summary`, `tags`, `connections`).
 
-3. **Read semantic metadata** for each service from the local `services/` directory:
-   ```bash
-   cat ~/Projects/rchiv-registry/services/<name>.rchiv.json
-   ```
-   Extract `semantic.purpose`, `semantic.summary`, `semantic.tags`, and `_meta.repo`.
+3. **Update or clone the matched repo** in the current working directory.
 
-4. **Match the task** to the right service(s) by comparing the task title and description against each service's `purpose`, `summary`, and `tags`. Consider also `connections` to identify related services if the task spans multiple services.
+4. **Gather working context** from the repo: detect build tools, test commands, working directories.
 
-5. **Ensure the repo is available locally**. Check if the repo exists at `~/Projects/<name>`:
-   ```bash
-   ls ~/Projects/<name>/.git
-   ```
-   If not present, clone it:
-   ```bash
-   gh repo clone Evaneos/<name> ~/Projects/<name>
-   ```
-   If present, pull latest:
-   ```bash
-   git -C ~/Projects/<name> pull --ff-only
-   ```
-
-6. **Gather working context** from the cloned repo: detect build tools, test commands, working directories.
+5. **Install dependencies**.
 
 ## Output
 
