@@ -7,6 +7,9 @@ import { spawnAgent } from "../terminal.js";
 
 const app = new Hono();
 
+const SAFE_NAME = /^[a-zA-Z0-9._-]+$/;
+const INSPECTOR_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
 interface ReviewRequest {
   owner: string;
   repo: string;
@@ -65,6 +68,14 @@ function dispatchInspector(
 ): Promise<ReviewResult> {
   return new Promise((resolve) => {
     const prompt = buildInspectorPrompt(owner, repo, number, pr, diff);
+    let resolved = false;
+
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve({ status: "error", error: "Inspector timed out after 10 minutes" });
+      }
+    }, INSPECTOR_TIMEOUT_MS);
 
     const args = [
       "--agent", "kanban:Inspector",
@@ -77,6 +88,9 @@ function dispatchInspector(
       cwd,
       interactive: false,
       onFinish: (output, exitCode) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timeout);
         const clean = output
           .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
           .replace(/\x1b\][^\x07]*\x07/g, "")
@@ -163,6 +177,10 @@ app.post("/api/github/review", async (c) => {
 
   if (!owner || !repo || !number) {
     return c.json({ status: "error", error: "owner, repo, and number required" } as ReviewResult, 400);
+  }
+
+  if (!SAFE_NAME.test(owner) || !SAFE_NAME.test(repo)) {
+    return c.json({ status: "error", error: "Invalid owner or repo name" } as ReviewResult, 400);
   }
 
   try {
