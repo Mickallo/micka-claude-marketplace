@@ -5,12 +5,40 @@
   import type { GitHubData, GitHubPR } from "../lib/types";
   import { cn } from "../lib/cn";
   import { formatDistanceToNow } from "../lib/time";
+  import { Eye } from "lucide-svelte";
+  import { reviewPR } from "../lib/api";
+  import type { ReviewResult } from "../lib/types";
 
   let data: GitHubData | null = $state(null);
   let loading = $state(true);
   let refreshing = $state(false);
   let myTab: "prs" | "drafts" = $state("prs");
   let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+  type ReviewState = { status: "idle" } | { status: "reviewing" } | { status: "done"; score: number; verdict: string } | { status: "error"; error: string };
+  let reviewStates: Map<string, ReviewState> = $state(new Map());
+
+  function prKey(pr: { repo: string; number: number }): string {
+    return `${pr.repo}#${pr.number}`;
+  }
+
+  async function startReview(pr: { repo: string; number: number }) {
+    const key = prKey(pr);
+    reviewStates.set(key, { status: "reviewing" });
+    reviewStates = new Map(reviewStates);
+    try {
+      const [owner, repo] = pr.repo.split("/");
+      const result: ReviewResult = await reviewPR(owner, repo, pr.number);
+      if (result.status === "ok") {
+        reviewStates.set(key, { status: "done", score: result.score ?? 0, verdict: result.verdict ?? "comment" });
+      } else {
+        reviewStates.set(key, { status: "error", error: result.error ?? "Unknown error" });
+      }
+    } catch (err: unknown) {
+      reviewStates.set(key, { status: "error", error: err instanceof Error ? err.message : "Network error" });
+    }
+    reviewStates = new Map(reviewStates);
+  }
 
   function ciColor(status: string | null | undefined): string {
     if (!status) return "#d29922";
@@ -169,66 +197,105 @@
           {/if}
           <div class="flex flex-col gap-1.5">
             {#each column.prs as pr}
-              <a
-                href={pr.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                class="block bg-card border border-l-[3px] border-border rounded-lg p-3 hover:bg-secondary/50 transition-colors no-underline"
+              <div
+                class="bg-card border border-l-[3px] border-border rounded-lg p-3 hover:bg-secondary/50 transition-colors"
                 style="border-left-color: {overallCiColor(pr.checks)}"
               >
-                <!-- Row 1: CI dot + repo + PR number + draft badge + age -->
-                <div class="flex items-center gap-2 mb-1.5">
-                  <span class="text-sm" style="color:{overallCiColor(pr.checks)}">{"\u25CF"}</span>
-                  <span class="text-xs text-muted-foreground">{pr.repo}</span>
-                  <span class="text-xs" style="color:#58a6ff">#{pr.number}</span>
-                  {#if pr.isDraft}
-                    <span class="text-[10px] bg-secondary text-muted-foreground px-2 py-0.5 rounded-full">DRAFT</span>
-                  {/if}
-                  <span class="ml-auto text-[11px] text-muted-foreground">{shortAge(pr.createdAt)}</span>
-                </div>
-                <!-- Row 2: Title -->
-                <div class="text-sm font-medium text-foreground mb-1.5 leading-snug">{pr.title}</div>
-                <!-- Row 3: Labels + author + diff + comments -->
-                <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
-                  {#each pr.labels as label}
-                    <span
-                      class="text-[11px] px-2 py-0.5 rounded-full"
-                      style="background:#{label.color}22;color:#{label.color}"
-                    >{label.name}</span>
-                  {/each}
-                  {#if column.showAuthor}
-                    <span class="text-[11px] text-muted-foreground">@{pr.author}</span>
-                  {/if}
-                  <span class="text-[11px]">
-                    <span style="color:#3fb950">+{pr.additions}</span><span style="color:#f85149">-{pr.deletions}</span>
-                  </span>
-                  {#if pr.commentCount > 0}
-                    <span class="text-[11px] text-muted-foreground">{pr.commentCount} msg</span>
-                  {/if}
-                </div>
-                <!-- Row 4: CI checks -->
-                {#if pr.checks.length > 0}
-                  <div class="flex items-center gap-1 flex-wrap">
-                    {#each pr.checks as check}
+                <a
+                  href={pr.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="block no-underline"
+                >
+                  <!-- Row 1: CI dot + repo + PR number + draft badge + age -->
+                  <div class="flex items-center gap-2 mb-1.5">
+                    <span class="text-sm" style="color:{overallCiColor(pr.checks)}">{"\u25CF"}</span>
+                    <span class="text-xs text-muted-foreground">{pr.repo}</span>
+                    <span class="text-xs" style="color:#58a6ff">#{pr.number}</span>
+                    {#if pr.isDraft}
+                      <span class="text-[10px] bg-secondary text-muted-foreground px-2 py-0.5 rounded-full">DRAFT</span>
+                    {/if}
+                    <span class="ml-auto text-[11px] text-muted-foreground">{shortAge(pr.createdAt)}</span>
+                  </div>
+                  <!-- Row 2: Title -->
+                  <div class="text-sm font-medium text-foreground mb-1.5 leading-snug">{pr.title}</div>
+                  <!-- Row 3: Labels + author + diff + comments -->
+                  <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
+                    {#each pr.labels as label}
                       <span
-                        class="text-[10px] px-1.5 py-0.5 rounded"
-                        style="background:{ciColor(check.status)}15;color:{ciColor(check.status)}"
-                      >{check.name} {ciIcon(check.status)}</span>
+                        class="text-[11px] px-2 py-0.5 rounded-full"
+                        style="background:#{label.color}22;color:#{label.color}"
+                      >{label.name}</span>
                     {/each}
+                    {#if column.showAuthor}
+                      <span class="text-[11px] text-muted-foreground">@{pr.author}</span>
+                    {/if}
+                    <span class="text-[11px]">
+                      <span style="color:#3fb950">+{pr.additions}</span><span style="color:#f85149">-{pr.deletions}</span>
+                    </span>
+                    {#if pr.commentCount > 0}
+                      <span class="text-[11px] text-muted-foreground">{pr.commentCount} msg</span>
+                    {/if}
+                  </div>
+                  <!-- Row 4: CI checks -->
+                  {#if pr.checks.length > 0}
+                    <div class="flex items-center gap-1 flex-wrap">
+                      {#each pr.checks as check}
+                        <span
+                          class="text-[10px] px-1.5 py-0.5 rounded"
+                          style="background:{ciColor(check.status)}15;color:{ciColor(check.status)}"
+                        >{check.name} {ciIcon(check.status)}</span>
+                      {/each}
+                    </div>
+                  {/if}
+                  <!-- Row 5: Reviewers -->
+                  {#if pr.reviews.length > 0}
+                    <div class="flex items-center gap-1 flex-wrap mt-1">
+                      {#each pr.reviews as review}
+                        <span
+                          class="text-[10px] px-1.5 py-0.5 rounded"
+                          style="background:{reviewColor(review.state)}15;color:{reviewColor(review.state)}"
+                        >@{review.author} {reviewIcon(review.state)}</span>
+                      {/each}
+                    </div>
+                  {/if}
+                </a>
+                <!-- Row 6: Review button (only in Needs Review column) -->
+                {#if column.showAuthor}
+                  {@const state = reviewStates.get(prKey(pr)) ?? { status: "idle" }}
+                  <div class="flex items-center gap-2 mt-2 pt-2 border-t border-border">
+                    {#if state.status === "idle"}
+                      <button
+                        class="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md border border-border bg-secondary text-foreground hover:bg-secondary/80 transition-colors"
+                        onclick={() => startReview(pr)}
+                      >
+                        <Eye class="w-3 h-3" />
+                        Review
+                      </button>
+                    {:else if state.status === "reviewing"}
+                      <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <Loader2 class="w-3 h-3 animate-spin" />
+                        Reviewing...
+                      </div>
+                    {:else if state.status === "done"}
+                      <span
+                        class="text-[11px] px-2.5 py-1 rounded-md"
+                        style="background:{state.verdict === 'approve' ? '#3fb950' : '#d29922'}22;color:{state.verdict === 'approve' ? '#3fb950' : '#d29922'}"
+                      >
+                        {state.verdict === "approve" ? "\u2713 Approved" : "\u25CB Comment"} ({state.score}/5)
+                      </span>
+                    {:else if state.status === "error"}
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-[11px] text-red-400">{"\u2717"} {state.error}</span>
+                        <button
+                          class="text-[11px] px-2 py-0.5 rounded border border-border text-foreground hover:bg-secondary/80"
+                          onclick={() => startReview(pr)}
+                        >Retry</button>
+                      </div>
+                    {/if}
                   </div>
                 {/if}
-                <!-- Row 5: Reviewers -->
-                {#if pr.reviews.length > 0}
-                  <div class="flex items-center gap-1 flex-wrap mt-1">
-                    {#each pr.reviews as review}
-                      <span
-                        class="text-[10px] px-1.5 py-0.5 rounded"
-                        style="background:{reviewColor(review.state)}15;color:{reviewColor(review.state)}"
-                      >@{review.author} {reviewIcon(review.state)}</span>
-                    {/each}
-                  </div>
-                {/if}
-              </a>
+              </div>
             {/each}
             {#if column.prs.length === 0}
               <div class="text-xs text-muted-foreground text-center py-6">No PRs</div>
