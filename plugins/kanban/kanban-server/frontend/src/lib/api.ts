@@ -1,4 +1,4 @@
-import type { Task, BoardResponse, PipelinesFile, AgentInfo, GitInfo, DashboardData, GitHubData } from "./types.js";
+import type { Task, BoardResponse, PipelinesFile, AgentInfo, GitInfo, DashboardData, GitHubData, ReviewResult } from "./types.js";
 
 const BASE = "";
 
@@ -116,4 +116,12 @@ export async function fetchDashboard(pipeline?: string, days?: number): Promise<
 export async function fetchGitHub(force?: boolean): Promise<GitHubData> {
   const params = force ? "?force=true" : "";
   return json(`/api/github${params}`);
+}
+
+export async function reviewPR(owner: string, repo: string, number: number): Promise<ReviewResult> {
+  return json("/api/github/review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner, repo, number }),
+  });
 }

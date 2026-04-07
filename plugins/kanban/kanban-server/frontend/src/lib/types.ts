@@ -132,3 +132,11 @@ export interface GitHubData {
     ciPassRate: number;
   };
 }
+
+export interface ReviewResult {
+  status: "ok" | "error";
+  score?: number;
+  verdict?: "approve" | "comment";
+  body?: string;
+  error?: string;
+}
