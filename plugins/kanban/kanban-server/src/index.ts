@@ -13,6 +13,7 @@ import taskRoutes from "./routes/tasks.js";
 import eventsRoutes from "./routes/events.js";
 import notificationsRoutes from "./routes/notifications.js";
 import githubRoutes from "./routes/github.js";
+import githubReviewRoutes from "./routes/github-review.js";
 import { setupTerminalWS } from "./terminal.js";
 import { getDb } from "./db.js";
 import type { Task, Block } from "./types.js";
@@ -81,6 +82,7 @@ app.route("/", taskRoutes);
 app.route("/", eventsRoutes);
 app.route("/", notificationsRoutes);
 app.route("/", githubRoutes);
+app.route("/", githubReviewRoutes);
 
 // Serve static files from Svelte frontend build
 const staticRoot = path.resolve(import.meta.dirname, "..", "dist");
