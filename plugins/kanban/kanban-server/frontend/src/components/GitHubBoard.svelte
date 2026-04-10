@@ -12,7 +12,7 @@
   let data: GitHubData | null = $state(null);
   let loading = $state(true);
   let refreshing = $state(false);
-  let myTab: "prs" | "drafts" = $state("prs");
+  let reviewAuthorTab: string | null = $state(null);
   let pollInterval: ReturnType<typeof setInterval> | null = null;
 
   type ReviewState = { status: "idle" } | { status: "reviewing" } | { status: "done"; score: number; verdict: string } | { status: "error"; error: string };
@@ -80,6 +80,20 @@
     const allPass = checks.every(c => (c.status || "").toUpperCase() === "SUCCESS");
     if (allPass) return "#3fb950";
     return "#d29922";
+  }
+
+  function groupByAuthor(prs: GitHubPR[]): { author: string; prs: GitHubPR[] }[] {
+    const sorted = [...prs].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const groups = new Map<string, GitHubPR[]>();
+    for (const pr of sorted) {
+      const list = groups.get(pr.author) ?? [];
+      list.push(pr);
+      groups.set(pr.author, list);
+    }
+    // Sort groups by most recent PR in each group (descending)
+    return [...groups.entries()]
+      .sort((a, b) => new Date(b[1][0].createdAt).getTime() - new Date(a[1][0].createdAt).getTime())
+      .map(([author, prs]) => ({ author, prs }));
   }
 
   function shortAge(dateStr: string): string {
@@ -150,8 +164,8 @@
         <div class="text-[9px] text-muted-foreground uppercase tracking-wider mt-0.5">To Review</div>
       </div>
       <div class="bg-card border border-border rounded-lg p-3.5 text-center">
-        <div class="text-2xl font-bold font-mono" style="color:#58a6ff">{data.stats.authoredCount + data.stats.assignedCount}</div>
-        <div class="text-[9px] text-muted-foreground uppercase tracking-wider mt-0.5">My PRs</div>
+        <div class="text-2xl font-bold font-mono" style="color:#58a6ff">{allMyPrs.length}</div>
+        <div class="text-[9px] text-muted-foreground uppercase tracking-wider mt-0.5">Mine</div>
       </div>
       <div class="bg-card border border-border rounded-lg p-3.5 text-center">
         <div class="text-2xl font-bold font-mono" style="color:#3fb950">{Math.round(data.stats.ciPassRate * 100)}%</div>
@@ -159,110 +173,80 @@
       </div>
     </div>
 
-    <!-- 2-Column Grid -->
+    <!-- All PRs — single column with author tabs -->
     {@const allMyPrs = [...data.authored, ...data.assigned]}
-    {@const myPrsOnly = allMyPrs.filter(pr => !pr.isDraft)}
-    {@const myDrafts = allMyPrs.filter(pr => pr.isDraft)}
-    {@const myFiltered = myTab === "prs" ? myPrsOnly : myDrafts}
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-      {#each [
-        { title: "Needs Review", color: "#f0883e", prs: data.review, showAuthor: true, tabs: false },
-        { title: "My PRs", color: "#58a6ff", prs: myFiltered, showAuthor: false, tabs: true },
-      ] as column}
-        <div>
-          {#if column.tabs}
-            <div class="flex gap-0 mb-2" style="border-bottom:2px solid #30363d">
-              <button
-                class="text-xs font-semibold px-2.5 py-1.5 transition-colors"
-                style={myTab === "prs" ? "color:#58a6ff;border-bottom:2px solid #58a6ff;margin-bottom:-2px" : "color:#8b949e"}
-                onclick={() => myTab = "prs"}
-              >
-                My PRs ({myPrsOnly.length})
-              </button>
-              <button
-                class="text-xs font-semibold px-2.5 py-1.5 transition-colors"
-                style={myTab === "drafts" ? "color:#a371f7;border-bottom:2px solid #a371f7;margin-bottom:-2px" : "color:#8b949e"}
-                onclick={() => myTab = "drafts"}
-              >
-                My Drafts ({myDrafts.length})
-              </button>
-            </div>
-          {:else}
-            <div
-              class="text-xs font-semibold mb-2 px-2.5 py-1.5"
-              style="color:{column.color};border-bottom:2px solid {column.color}"
+    {@const meGroup = { author: "me", prs: [...allMyPrs].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) }}
+    {@const reviewGroups = groupByAuthor(data.review)}
+    {@const allGroups = [meGroup, ...reviewGroups]}
+    {@const activeAuthor = reviewAuthorTab ?? allGroups[0]?.author ?? null}
+    {@const allActivePrs = allGroups.find(g => g.author === activeAuthor)?.prs ?? []}
+    {@const activePrs = allActivePrs.filter(pr => !pr.isDraft)}
+    {@const activeDrafts = allActivePrs.filter(pr => pr.isDraft)}
+    <div>
+      <div>
+        <div class="flex gap-0 mb-2 overflow-x-auto" style="border-bottom:2px solid #30363d">
+          {#each allGroups as group}
+            <button
+              class="text-xs font-semibold px-2.5 py-1.5 transition-colors whitespace-nowrap"
+              style={activeAuthor === group.author ? `color:${group.author === "me" ? "#58a6ff" : "#f0883e"};border-bottom:2px solid ${group.author === "me" ? "#58a6ff" : "#f0883e"};margin-bottom:-2px` : "color:#8b949e"}
+              onclick={() => reviewAuthorTab = group.author}
             >
-              {column.title} ({column.prs.length})
-            </div>
-          {/if}
-          <div class="flex flex-col gap-1.5">
-            {#each column.prs as pr}
-              <div
-                class="bg-card border border-l-[3px] border-border rounded-lg p-3 hover:bg-secondary/50 transition-colors"
-                style="border-left-color: {overallCiColor(pr.checks)}"
-              >
-                <a
-                  href={pr.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="block no-underline"
+              @{group.author} ({group.prs.length})
+            </button>
+          {/each}
+        </div>
+        <div class="flex flex-col gap-1.5">
+          {#each [
+            { label: null, items: activePrs },
+            { label: "Drafts", items: activeDrafts },
+          ] as section}
+            {#if section.items.length > 0}
+              {#if section.label}
+                <div class="text-[10px] text-muted-foreground uppercase tracking-wider mt-3 mb-1 px-1">{section.label}</div>
+              {/if}
+              {#each section.items as pr}
+                {@const state = reviewStates.get(prKey(pr)) ?? { status: "idle" }}
+                <div
+                  class="bg-card border border-l-[3px] border-border rounded-lg p-3 hover:bg-secondary/50 transition-colors"
+                  style="border-left-color: {overallCiColor(pr.checks)}"
                 >
-                  <!-- Row 1: CI dot + repo + PR number + draft badge + age -->
-                  <div class="flex items-center gap-2 mb-1.5">
-                    <span class="text-sm" style="color:{overallCiColor(pr.checks)}">{"\u25CF"}</span>
-                    <span class="text-xs text-muted-foreground">{pr.repo}</span>
-                    <span class="text-xs" style="color:#58a6ff">#{pr.number}</span>
-                    {#if pr.isDraft}
-                      <span class="text-[10px] bg-secondary text-muted-foreground px-2 py-0.5 rounded-full">DRAFT</span>
-                    {/if}
-                    <span class="ml-auto text-[11px] text-muted-foreground">{shortAge(pr.createdAt)}</span>
-                  </div>
-                  <!-- Row 2: Title -->
-                  <div class="text-sm font-medium text-foreground mb-1.5 leading-snug">{pr.title}</div>
-                  <!-- Row 3: Labels + author + diff + comments -->
-                  <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
-                    {#each pr.labels as label}
-                      <span
-                        class="text-[11px] px-2 py-0.5 rounded-full"
-                        style="background:#{label.color}22;color:#{label.color}"
-                      >{label.name}</span>
-                    {/each}
-                    {#if column.showAuthor}
-                      <span class="text-[11px] text-muted-foreground">@{pr.author}</span>
-                    {/if}
-                    <span class="text-[11px]">
-                      <span style="color:#3fb950">+{pr.additions}</span><span style="color:#f85149">-{pr.deletions}</span>
-                    </span>
-                    {#if pr.commentCount > 0}
-                      <span class="text-[11px] text-muted-foreground">{pr.commentCount} msg</span>
-                    {/if}
-                  </div>
-                  <!-- Row 4: CI checks -->
-                  {#if pr.checks.length > 0}
-                    <div class="flex items-center gap-1 flex-wrap">
-                      {#each pr.checks as check}
-                        <span
-                          class="text-[10px] px-1.5 py-0.5 rounded"
-                          style="background:{ciColor(check.status)}15;color:{ciColor(check.status)}"
-                        >{check.name} {ciIcon(check.status)}</span>
-                      {/each}
+                  <a href={pr.url} target="_blank" rel="noopener noreferrer" class="block no-underline">
+                    <div class="flex items-center gap-2 mb-1.5">
+                      <span class="text-sm" style="color:{overallCiColor(pr.checks)}">{"\u25CF"}</span>
+                      <span class="text-xs text-muted-foreground">{pr.repo}</span>
+                      <span class="text-xs" style="color:#58a6ff">#{pr.number}</span>
+                      {#if pr.isDraft}
+                        <span class="text-[10px] bg-secondary text-muted-foreground px-2 py-0.5 rounded-full">DRAFT</span>
+                      {/if}
+                      <span class="ml-auto text-[11px] text-muted-foreground">{shortAge(pr.createdAt)}</span>
                     </div>
-                  {/if}
-                  <!-- Row 5: Reviewers -->
-                  {#if pr.reviews.length > 0}
-                    <div class="flex items-center gap-1 flex-wrap mt-1">
-                      {#each pr.reviews as review}
-                        <span
-                          class="text-[10px] px-1.5 py-0.5 rounded"
-                          style="background:{reviewColor(review.state)}15;color:{reviewColor(review.state)}"
-                        >@{review.author} {reviewIcon(review.state)}</span>
+                    <div class="text-sm font-medium text-foreground mb-1.5 leading-snug">{pr.title}</div>
+                    <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
+                      {#each pr.labels as label}
+                        <span class="text-[11px] px-2 py-0.5 rounded-full" style="background:#{label.color}22;color:#{label.color}">{label.name}</span>
                       {/each}
+                      <span class="text-[11px]">
+                        <span style="color:#3fb950">+{pr.additions}</span><span style="color:#f85149">-{pr.deletions}</span>
+                      </span>
+                      {#if pr.commentCount > 0}
+                        <span class="text-[11px] text-muted-foreground">{pr.commentCount} msg</span>
+                      {/if}
                     </div>
-                  {/if}
-                </a>
-                <!-- Row 6: Review button (only in Needs Review column) -->
-                {#if column.showAuthor}
-                  {@const state = reviewStates.get(prKey(pr)) ?? { status: "idle" }}
+                    {#if pr.checks.length > 0}
+                      <div class="flex items-center gap-1 flex-wrap">
+                        {#each pr.checks as check}
+                          <span class="text-[10px] px-1.5 py-0.5 rounded" style="background:{ciColor(check.status)}15;color:{ciColor(check.status)}">{check.name} {ciIcon(check.status)}</span>
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if pr.reviews.length > 0}
+                      <div class="flex items-center gap-1 flex-wrap mt-1">
+                        {#each pr.reviews as review}
+                          <span class="text-[10px] px-1.5 py-0.5 rounded" style="background:{reviewColor(review.state)}15;color:{reviewColor(review.state)}">@{review.author} {reviewIcon(review.state)}</span>
+                        {/each}
+                      </div>
+                    {/if}
+                  </a>
                   <div class="flex items-center gap-2 mt-2 pt-2 border-t border-border">
                     {#if state.status === "idle"}
                       <button
@@ -294,15 +278,15 @@
                       </div>
                     {/if}
                   </div>
-                {/if}
-              </div>
-            {/each}
-            {#if column.prs.length === 0}
-              <div class="text-xs text-muted-foreground text-center py-6">No PRs</div>
+                </div>
+              {/each}
             {/if}
-          </div>
+          {/each}
+          {#if allActivePrs.length === 0}
+            <div class="text-xs text-muted-foreground text-center py-6">No PRs</div>
+          {/if}
         </div>
-      {/each}
+      </div>
     </div>
   {/if}
 </div>

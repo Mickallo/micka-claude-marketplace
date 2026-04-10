@@ -182,9 +182,10 @@
       pipelines={boardData?.pipelines ?? []}
       activePipeline={boardData?.pipeline ?? ""}
     />
-  {:else if activePage === "github"}
-    <GitHubBoard />
   {/if}
+  <div class:hidden={activePage !== "github"}>
+    <GitHubBoard />
+  </div>
 
   {#if showSettings}
     <PipelineSettings
