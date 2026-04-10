@@ -11,11 +11,11 @@ description: "Initialize the kanban system. Creates DB and default pipelines con
 
 ## Procedure
 
-### 1. Install board dependencies
+### 1. Install server dependencies
 
 ```bash
-if [ ! -d "${CLAUDE_PLUGIN_ROOT}/kanban-board/node_modules" ]; then
-  pnpm --dir "${CLAUDE_PLUGIN_ROOT}/kanban-board" install
+if [ ! -d "${CLAUDE_PLUGIN_ROOT}/kanban-server/node_modules" ]; then
+  pnpm --dir "${CLAUDE_PLUGIN_ROOT}/kanban-server" install
 fi
 ```
 
@@ -40,7 +40,7 @@ sqlite3 ~/.claude/kanban/kanban.db "CREATE TABLE IF NOT EXISTS tasks (
   started_at TEXT,
   completed_at TEXT
 );"
-sqlite3 ~/.claude/kanban/kanban.db "PRAGMA journal_mode=DELETE;"
+sqlite3 ~/.claude/kanban/kanban.db "PRAGMA journal_mode=WAL;"
 ```
 
 ### 3. Write default pipelines config (if not exists)
@@ -51,10 +51,10 @@ Create `~/.claude/kanban/pipelines.json` if it doesn't already exist:
 {
   "pipelines": {
     "full": {
-      "stages": ["Planner", "Critic", "Builder", "Shield", "Inspector", "Ranger"],
-      "gates": []
+      "stages": ["Resolver", "Planner", "Critic", "Builder", "Inspector", "Ranger"],
+      "gates": ["Critic", "Inspector"]
     },
-    "quick": { "stages": ["Builder", "Ranger"] }
+    "quick": { "stages": ["Resolver", "Builder", "Ranger"] }
   },
   "default": "full",
   "max_loops": 3
@@ -83,5 +83,5 @@ Kanban initialized.
   Stop:      /kanban-board-stop
 
 Add tasks with /kanban add <title>
-Configure pipelines with /kanban-board-start → ⚙️ Settings
+Configure pipelines with /kanban-board-start -> Settings
 ```

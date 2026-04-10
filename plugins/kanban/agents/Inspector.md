@@ -9,6 +9,7 @@ tools:
   - Bash(git log:*)
   - Bash(git show:*)
   - Bash(git symbolic-ref:*)
+  - Bash(git status:*)
   - Bash(gh api:*)
   - Bash(base64 -d:*)
   - Read
@@ -38,7 +39,15 @@ git diff origin/<default-branch>...HEAD
 
 (Detect default branch via `git symbolic-ref refs/remotes/origin/HEAD`, fallback to `main`.)
 
-### Step 2 — Load ADRs
+### Step 2 — Check clean working tree
+
+```bash
+git status --porcelain
+```
+
+If the output is non-empty, there are uncommitted changes. Set **Completion = 1** and verdict `nok`. List the dirty files in the feedback section with a clear message: "Uncommitted changes detected — the Builder must commit all work before review."
+
+### Step 3 — Load ADRs
 
 Follow the loading procedure from the `internal-code-review-adr-knowledge` skill:
 
@@ -50,7 +59,7 @@ Follow the loading procedure from the `internal-code-review-adr-knowledge` skill
 
 If no `.reviewer.json` exists or `adrs.include` is empty, skip ADR checking entirely and set ADR Compliance to N/A.
 
-### Step 3 — Score dimensions
+### Step 4 — Score dimensions
 
 Read the modified files and score on **8 dimensions (1-5 each)**:
 
@@ -67,7 +76,7 @@ Read the modified files and score on **8 dimensions (1-5 each)**:
 
 **ADR Compliance scoring**: Binary. Any single ADR violation = **1**. Zero violations = **5**. No ADRs configured = **N/A** (excluded from average and decision).
 
-### Step 4 — Analyze diff against ADRs
+### Step 5 — Analyze diff against ADRs
 
 For each file in the diff, check against loaded ADRs based on scope. Record every violation with:
 - File path and line number
@@ -75,7 +84,7 @@ For each file in the diff, check against loaded ADRs based on scope. Record ever
 - Violation description
 - Suggestion
 
-### Step 5 — Decision
+### Step 6 — Decision
 
 - ADR Compliance = 1 → `nok`
 - Security = 1 → `nok`
