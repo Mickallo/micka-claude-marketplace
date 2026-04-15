@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { X, GripVertical, Trash2 } from "lucide-svelte";
+  import { X, GripVertical, Trash2, Plus, Pencil } from "lucide-svelte";
   import { cn } from "../lib/cn";
   import type { PipelinesFile, AgentInfo } from "../lib/types";
   import { fetchPipelines, savePipelines, fetchAgents } from "../lib/api";
@@ -17,7 +17,15 @@
   let selectedAgent: string | null = $state(null);
   let addSelect = $state("");
 
-  let pipeline = $derived(pipelinesData?.pipelines[editingName] ?? { stages: [] });
+  let pipeline = $derived(pipelinesData?.pipelines[editingName] ?? { stages: [], gates: [] });
+
+  function toggleGate(stage: string) {
+    if (!pipelinesData) return;
+    const p = pipelinesData.pipelines[editingName];
+    const gates = p.gates ?? [];
+    p.gates = gates.includes(stage) ? gates.filter(g => g !== stage) : [...gates, stage];
+    pipelinesData = { ...pipelinesData };
+  }
   let pipelineNames = $derived(pipelinesData ? Object.keys(pipelinesData.pipelines) : []);
   let unusedAgents = $derived(agents.filter(a => !pipeline.stages.includes(a.name)));
   let agentMap = $derived(new Map(agents.map(a => [a.name, a])));
@@ -31,7 +39,10 @@
 
   function removeStage(idx: number) {
     if (!pipelinesData) return;
-    pipelinesData.pipelines[editingName].stages.splice(idx, 1);
+    const p = pipelinesData.pipelines[editingName];
+    const [removed] = p.stages.splice(idx, 1);
+    if (p.gates) p.gates = p.gates.filter(g => g !== removed);
+    if (selectedAgent === removed) selectedAgent = null;
     pipelinesData = { ...pipelinesData };
   }
   function addStage() {
@@ -42,6 +53,51 @@
     pipelinesData = { ...pipelinesData };
   }
   let dragIdx: number | null = $state(null);
+  let renamingName: string | null = $state(null);
+  let renameValue = $state("");
+
+  function addPipeline() {
+    if (!pipelinesData) return;
+    let base = "new-pipeline";
+    let name = base;
+    let i = 1;
+    while (pipelinesData.pipelines[name]) name = `${base}-${i++}`;
+    pipelinesData.pipelines[name] = { stages: [] };
+    pipelinesData = { ...pipelinesData };
+    editingName = name;
+    selectedAgent = null;
+    startRename(name);
+  }
+
+  function deletePipeline(name: string) {
+    if (!pipelinesData) return;
+    if (pipelineNames.length <= 1) return;
+    if (!confirm(`Delete pipeline "${name}"?`)) return;
+    delete pipelinesData.pipelines[name];
+    if (pipelinesData.default === name) pipelinesData.default = Object.keys(pipelinesData.pipelines)[0];
+    if (editingName === name) editingName = Object.keys(pipelinesData.pipelines)[0];
+    pipelinesData = { ...pipelinesData };
+  }
+
+  function startRename(name: string) {
+    renamingName = name;
+    renameValue = name;
+  }
+
+  function commitRename() {
+    if (!pipelinesData || !renamingName) return;
+    const oldName = renamingName;
+    const newName = renameValue.trim();
+    renamingName = null;
+    if (!newName || newName === oldName) return;
+    if (pipelinesData.pipelines[newName]) { alert(`Pipeline "${newName}" already exists`); return; }
+    const entries = Object.entries(pipelinesData.pipelines);
+    const renamed = Object.fromEntries(entries.map(([k, v]) => [k === oldName ? newName : k, v]));
+    pipelinesData.pipelines = renamed;
+    if (pipelinesData.default === oldName) pipelinesData.default = newName;
+    if (editingName === oldName) editingName = newName;
+    pipelinesData = { ...pipelinesData };
+  }
 
   function handleStageDrop(e: DragEvent, dropIdx: number) {
     e.preventDefault();
@@ -70,11 +126,35 @@
 
     {#if pipelinesData}
       <!-- Tabs -->
-      <div class="flex gap-1 bg-secondary rounded-lg p-1 w-fit mb-6">
+      <div class="flex gap-1 bg-secondary rounded-lg p-1 w-fit mb-6 items-center">
         {#each pipelineNames as name}
-          <button class={cn("px-4 py-1.5 text-sm rounded-md transition-all", name === editingName ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
-            onclick={() => { editingName = name; selectedAgent = null; }}>{name}</button>
+          {#if renamingName === name}
+            <input
+              class="px-3 py-1.5 text-sm rounded-md bg-card border border-border w-40"
+              bind:value={renameValue}
+              autofocus
+              onblur={commitRename}
+              onkeydown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") renamingName = null; }}
+            />
+          {:else}
+            <div class={cn("flex items-center gap-1 rounded-md transition-all group", name === editingName ? "bg-card shadow-sm" : "hover:bg-card/50")}>
+              <button class={cn("pl-3 pr-1 py-1.5 text-sm", name === editingName ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
+                ondblclick={() => startRename(name)}
+                onclick={() => { editingName = name; selectedAgent = null; }}>{name}</button>
+              <button class="opacity-0 group-hover:opacity-100 p-1 hover:text-primary" title="Rename" onclick={() => startRename(name)}>
+                <Pencil class="w-3 h-3" />
+              </button>
+              {#if pipelineNames.length > 1}
+                <button class="opacity-0 group-hover:opacity-100 pr-2 py-1 hover:text-destructive" title="Delete" onclick={() => deletePipeline(name)}>
+                  <Trash2 class="w-3 h-3" />
+                </button>
+              {/if}
+            </div>
+          {/if}
         {/each}
+        <button class="px-2 py-1.5 text-sm rounded-md text-muted-foreground hover:text-foreground hover:bg-card/50" title="Add pipeline" onclick={addPipeline}>
+          <Plus class="w-4 h-4" />
+        </button>
       </div>
 
       <div class="flex gap-6">
@@ -89,7 +169,7 @@
             {#each pipeline.stages as stage, i}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div class={cn(
-                  "flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-all border border-transparent hover:bg-secondary",
+                  "group flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-all border border-transparent hover:bg-secondary",
                   selectedAgent === stage && "bg-primary/10 border-primary/30",
                   dragIdx === i && "opacity-40"
                 )}
@@ -101,11 +181,22 @@
                 ondrop={(e) => { e.preventDefault(); handleStageDrop(e, i); }}
               >
                 <GripVertical class="w-3.5 h-3.5 text-muted-foreground cursor-grab" />
+                <label class="flex items-center gap-1" title="Gate" onclick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    class="w-3.5 h-3.5 accent-primary cursor-pointer"
+                    checked={(pipeline.gates ?? []).includes(stage)}
+                    onchange={() => toggleGate(stage)}
+                  />
+                </label>
                 <span class="text-sm font-medium flex-1">{stage}</span>
+                {#if (pipeline.gates ?? []).includes(stage)}
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400">gate</span>
+                {/if}
                 {#if agentMap.get(stage)?.model}
                   <span class="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{agentMap.get(stage)?.model}</span>
                 {/if}
-                <button class="opacity-0 group-hover:opacity-100 hover:text-destructive" onclick={(e) => { e.stopPropagation(); removeStage(i); }}>
+                <button class="opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity" title="Remove" onclick={(e) => { e.stopPropagation(); removeStage(i); }}>
                   <Trash2 class="w-3.5 h-3.5" />
                 </button>
               </div>
