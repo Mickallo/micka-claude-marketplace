@@ -153,6 +153,24 @@ export async function runPipeline(opts: RunOptions): Promise<void> {
       if (repoMatch) repo = repoMatch[1];
     }
 
+    // Recover from interrupted run: if the last block is an "ok" verdict for the current stage,
+    // the previous run completed the agent but crashed before advancing the task status.
+    const lastBlock = blocks[blocks.length - 1];
+    if (lastBlock && lastBlock.agent === currentStage && lastBlock.verdict === "ok") {
+      if (gates.includes(currentStage)) {
+        await apiPatch(`/api/task/${taskId}`, { status: `awaiting:${currentStage}`, loop_count: 0 });
+        onLog(`Task #${taskId}: recovered — stage ${currentStage} already ok, awaiting validation.`);
+        return;
+      }
+      const nextStage = columns[currentIdx + 1];
+      await apiPatch(`/api/task/${taskId}`, { status: nextStage, loop_count: 0 });
+      onLog(`Task #${taskId}: recovered — ${currentStage} already ok, advancing to ${nextStage}`);
+      if (nextStage === "done") return;
+      if (step) return;
+      if (!auto) return;
+      continue;
+    }
+
     // Acquire repo lock
     if (repo) await acquireRepo(repo, currentStage);
 
@@ -201,7 +219,13 @@ export async function runPipeline(opts: RunOptions): Promise<void> {
       let parsed = { verdict: "ok" as string };
       for (let i = 0; i < 600; i++) {  // max 10 minutes
         await new Promise((r) => setTimeout(r, 3000));
-        const updatedTask: Task = await api(`/api/task/${taskId}`);
+        let updatedTask: Task;
+        try {
+          updatedTask = await api(`/api/task/${taskId}`);
+        } catch (err) {
+          onLog(`Task #${taskId}: transient poll error (${(err as Error).message}), retrying...`);
+          continue;
+        }
         const updatedBlocks: Block[] = updatedTask.blocks ? JSON.parse(updatedTask.blocks) : [];
         const lastBlock = updatedBlocks[updatedBlocks.length - 1];
         if (lastBlock && lastBlock.verdict !== "running") {
