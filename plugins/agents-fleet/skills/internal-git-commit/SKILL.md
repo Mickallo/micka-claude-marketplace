@@ -1,7 +1,6 @@
 ---
 name: internal-git-commit
 description: Karma convention for git commits - format, types, body structure, and split strategy guidelines
-disable-model-invocation: true
 user-invocable: false
 ---
 

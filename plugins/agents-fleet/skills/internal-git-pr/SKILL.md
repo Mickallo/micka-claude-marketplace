@@ -1,7 +1,6 @@
 ---
 name: internal-git-pr
 description: PR formatting conventions - Karma title format, Why/What body structure, and adaptive complexity guidelines
-disable-model-invocation: true
 user-invocable: false
 ---
 

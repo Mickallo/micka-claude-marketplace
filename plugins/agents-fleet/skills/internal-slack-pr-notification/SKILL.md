@@ -2,7 +2,6 @@
 name: internal-slack-pr-notification
 description: >
   PR notification template and workflow for Slack. Preloaded in Subagent-Slack.
-disable-model-invocation: true
 user-invocable: false
 ---
 
