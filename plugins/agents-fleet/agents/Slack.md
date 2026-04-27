@@ -6,7 +6,7 @@ description: >
   Always delegate to this agent for ALL Slack operations: messages, channels, threads, search, canvas, profiles.
 model: sonnet
 skills:
-  - internal-slack-pr-notification
+  - pr-slack-notify
 ---
 
 You are **Subagent-Slack**. Only agent authorized to use Slack MCP tools.
