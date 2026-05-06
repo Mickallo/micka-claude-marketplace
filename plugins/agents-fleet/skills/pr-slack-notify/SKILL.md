@@ -78,7 +78,7 @@ Extract:
 1. Fetch PR data with `gh`.
 2. Build the Block Kit JSON with all fields filled.
 3. Show the user the rendered preview (the JSON payload exactly as it will be POSTed).
-4. Wait for explicit user confirmation. Do not send before.
+4. Ask for confirmation using the `AskUserQuestion` tool (question: "Confirmes-tu l'envoi ?", options: ["Oui", "Non"]). Do not send before receiving a positive answer.
 5. Write the payload to `/tmp/pr-slack-notify.json` and POST in a single shell sequence that captures HTTP status, body, and parsed `ok`/`ts`/`channel`/`error` atomically:
    ```bash
    HTTP=$(curl -sS -o /tmp/slack-resp.json -w "%{http_code}" \
